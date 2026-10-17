@@ -34,7 +34,8 @@ These are deliberate trade-offs, documented so you can decide for yourself:
   anything in them, including source code and build scripts you later run on
   the Mac. orbit-vmm itself runs from `~/.orbit/bin` (`make install`), not from
   the checkout, and `make up` builds nothing. The VMM refuses to share your
-  home directory or anything above it, hidden directories, or `~/Library`. It
+  home directory or anything above it, hidden directories, `~/Library`,
+  `~/bin`, or `~/Applications`. It
   also never lets the guest rename, remove or replace the shared directories
   themselves, and refuses entries that resolve through a symlink located
   inside a shared directory. That check covers the directories shared by

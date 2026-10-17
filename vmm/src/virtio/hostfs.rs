@@ -166,6 +166,10 @@ fn unsafe_share(home: &Path, dir: &Path) -> Option<&'static str> {
     if name.starts_with(b".") || name.eq_ignore_ascii_case(b"Library") {
         return Some("it is (inside) a hidden directory or ~/Library");
     }
+    // Commonly on PATH or opened by the system: writable means code execution.
+    if name.eq_ignore_ascii_case(b"bin") || name.eq_ignore_ascii_case(b"Applications") {
+        return Some("it is (inside) ~/bin or ~/Applications");
+    }
     None
 }
 
@@ -381,7 +385,14 @@ impl Root {
     /// opened as itself, never followed).
     fn xattr_fd(&self, p: &Path) -> Result<OwnedFd, i32> {
         let (dir, name) = self.parent(p)?;
-        openat(dir.as_raw_fd(), &name, libc::O_RDONLY | libc::O_SYMLINK | libc::O_NONBLOCK, 0)
+        match openat(dir.as_raw_fd(), &name, libc::O_RDONLY | libc::O_SYMLINK | libc::O_NONBLOCK, 0) {
+            // Unreadable (e.g. mode 0200 or 000): an event-only fd needs no read
+            // permission and still works for xattrs.
+            Err(libc::EACCES) => {
+                openat(dir.as_raw_fd(), &name, libc::O_EVTONLY | libc::O_SYMLINK | libc::O_NONBLOCK, 0)
+            }
+            other => other,
+        }
     }
 
     pub fn get_xattr(&self, p: &Path, key: &std::ffi::CStr) -> Option<Vec<u8>> {
@@ -450,9 +461,15 @@ mod tests {
     #[test]
     fn refuses_home_and_sensitive_dirs() {
         let h = Path::new("/Users/me");
-        for bad in
-            ["/", "/Users", "/Users/me", "/Users/me/.orbit/bin", "/Users/me/.ssh", "/Users/me/Library/LaunchAgents"]
-        {
+        for bad in [
+            "/",
+            "/Users",
+            "/Users/me",
+            "/Users/me/.orbit/bin",
+            "/Users/me/.ssh",
+            "/Users/me/Library/LaunchAgents",
+            "/Users/me/bin",
+        ] {
             assert!(unsafe_share(h, Path::new(bad)).is_some(), "{bad}");
         }
         for ok in ["/Users/me/work", "/Users/me/src/a.b", "/Users/other"] {

@@ -284,12 +284,26 @@ const OWNER_XATTR: &std::ffi::CStr = c"user.orbit.owner";
 /// The mode the guest set, when the Mac file got a safer one (see host_mode).
 const MODE_XATTR: &std::ffi::CStr = c"user.orbit.mode";
 
-/// What a guest-requested mode becomes on the Mac file: no setuid/setgid and
-/// no group/other write. Otherwise a container could hand other local Mac
-/// users a setuid-you binary or world-writable project files. The guest still
-/// sees the mode it asked for (MODE_XATTR).
-fn host_mode(mode: u32) -> u32 {
-    mode & 0o1755
+/// What a guest-requested mode becomes on the Mac file (`kind`: the file's
+/// S_IFMT bits). There is no setuid/setgid and no group/other write, or a
+/// container could hand other local Mac users a setuid-you binary or
+/// world-writable project files. The owner always keeps access, which macOS
+/// requires for reading the xattrs that hold the guest's view. The guest
+/// still sees the mode it asked for (MODE_XATTR).
+fn host_mode(mode: u32, kind: u32) -> u32 {
+    (mode & 0o1755) | owner_access(kind)
+}
+
+const REG: u32 = libc::S_IFREG as u32;
+const DIR: u32 = libc::S_IFDIR as u32;
+
+/// Owner permission bits macOS needs before it lets us touch a file's xattrs.
+fn owner_access(mode: u32) -> u32 {
+    if mode & libc::S_IFMT as u32 == libc::S_IFDIR as u32 {
+        0o700
+    } else {
+        0o600
+    }
 }
 
 /// Records the guest-visible mode of `path` when it differs from the Mac one.
@@ -299,7 +313,8 @@ fn set_mode(root: &Root, path: &Path, mode: u32) -> Result<(), i32> {
     }
     let mode = mode & 0o7777;
     let v = format!("{mode:o}");
-    root.set_xattr(path, MODE_XATTR, (host_mode(mode) != mode).then_some(v.as_bytes()))
+    let kind = root.lstat(path)?.mode;
+    root.set_xattr(path, MODE_XATTR, (host_mode(mode, kind) != mode).then_some(v.as_bytes()))
 }
 
 fn emulate_ownership() -> bool {
@@ -550,13 +565,19 @@ impl Server {
     }
 
     /// Gives a file the creating process's owner (and so its exact mode).
+    /// Bookkeeping for something the guest just created (with owner access,
+    /// so its xattrs can be written); then gives it its final Mac mode.
     fn created(&self, path: &Path, caller: (u32, u32), mode: Option<u32>) -> Result<(), i32> {
         self.touched(path);
         set_owner(&self.root, path, caller)?;
-        match mode {
-            Some(m) => set_mode(&self.root, path, m),
-            None => Ok(()),
+        if let Some(m) = mode {
+            set_mode(&self.root, path, m)?;
+            let real = self.root.lstat(path)?.mode;
+            if real & 0o7777 != host_mode(m, real) {
+                self.root.chmod(path, host_mode(m, real))?;
+            }
         }
+        Ok(())
     }
 
     /// Notes that the guest itself changed `path`.
@@ -665,7 +686,7 @@ impl Server {
                 } else {
                     self.child(node, name).and_then(|p| {
                         self.replaceable(&p)?;
-                        self.root.open_file(&p, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, host_mode(mode))?;
+                        self.root.open_file(&p, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, host_mode(mode, REG))?;
                         self.created(&p, caller, Some(mode))?;
                         self.entry(p)
                     })
@@ -677,7 +698,7 @@ impl Server {
                 let name = r.name();
                 self.child(node, name).and_then(|p| {
                     self.replaceable(&p)?;
-                    self.root.mkdir(&p, host_mode(mode & !umask))?;
+                    self.root.mkdir(&p, host_mode(mode & !umask, DIR))?;
                     self.created(&p, caller, Some(mode & !umask))?;
                     self.entry(p)
                 })
@@ -740,11 +761,20 @@ impl Server {
                 r.skip(4);
                 let name = r.name();
                 self.child(node, name).and_then(|p| {
-                    let fh = self.open(&p, flags | 0o100, Some(host_mode(mode & !umask)))?;
-                    self.created(&p, caller, Some(mode & !umask))?;
-                    let mut out = self.entry(p)?;
-                    out.extend_from_slice(&open_out(fh, 0));
-                    Ok(out)
+                    let fh = self.open(&p, flags | 0o100, Some(host_mode(mode & !umask, REG)))?;
+                    let done = self.created(&p, caller, Some(mode & !umask)).and_then(|_| self.entry(p));
+                    match done {
+                        Ok(mut out) => {
+                            out.extend_from_slice(&open_out(fh, 0));
+                            Ok(out)
+                        }
+                        Err(e) => {
+                            // The guest never learns this fh, so it will never release it.
+                            self.handles.lock().unwrap().remove(&fh);
+                            self.handle_paths.lock().unwrap().remove(&fh);
+                            Err(e)
+                        }
+                    }
                 })
             }
             FUSE_READ => {
@@ -827,7 +857,9 @@ impl Server {
             }
             flags &= !libc::O_APPEND;
         }
-        let write = flags & libc::O_ACCMODE != libc::O_RDONLY || create_mode.is_some() || flags & libc::O_TRUNC != 0;
+        let write = flags & libc::O_ACCMODE != libc::O_RDONLY
+            || create_mode.is_some()
+            || flags & (libc::O_TRUNC | libc::O_CREAT) != 0;
         if write {
             self.writable(path)?
         } else {
@@ -982,6 +1014,15 @@ impl Server {
         self.writable(&path)?;
         self.touched(&path);
         if valid & FATTR_MODE != 0 {
+            let root_dir = self.root.is_allowed_root(&path);
+            // macOS refuses xattr access to a file its owner can't read/write
+            // (e.g. after a guest chmod 000), so open it up for the bookkeeping
+            // and set the final mode last.
+            let real = self.root.lstat(&path)?.mode;
+            let unlock = owner_access(real);
+            if !root_dir && emulate_ownership() && real & unlock != unlock {
+                self.root.chmod(&path, (real & 0o7777) | unlock)?;
+            }
             // From now on the guest owns this file's mode: pin its owner record
             // so the exact mode it set is what it sees.
             if emulate_ownership() && self.root.get_xattr(&path, OWNER_XATTR).is_none() {
@@ -989,13 +1030,13 @@ impl Server {
                 set_owner(&self.root, &path, (v.uid, v.gid))?;
             }
             // Allowed directories keep their Mac mode (they are like mount points).
-            if self.root.is_allowed_root(&path) {
+            if root_dir {
                 if emulate_ownership() {
                     self.root.set_xattr(&path, MODE_XATTR, Some(format!("{:o}", mode & 0o7777).as_bytes()))?;
                 }
             } else {
-                self.root.chmod(&path, host_mode(mode))?;
                 set_mode(&self.root, &path, mode)?;
+                self.root.chmod(&path, host_mode(mode, real))?;
             }
         }
         if valid & FATTR_SIZE != 0 {

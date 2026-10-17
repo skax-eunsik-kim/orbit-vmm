@@ -27,6 +27,8 @@ check "no write via swapped symlink"  '! sh -c "echo pwned > $A/swap/planted.txt
 # Modes: the guest sees what it set; the Mac file never gets setuid or
 # group/other write (checked on the host by fssec.sh).
 check "guest sees the mode it set"    'touch $A/suid && chmod 4777 $A/suid && [ "$(stat -c %a $A/suid)" = 4777 ]'
+check "chmod 000 can be undone"       'touch $A/m0 && chmod 000 $A/m0 && chmod 644 $A/m0 && [ "$(stat -c %a $A/m0)" = 644 ]'
+check "create write-only file"        'su dev -s /bin/sh -c "umask 0577; echo w > $A/wo" && [ "$(stat -c %a $A/wo)" = 200 ]'
 # Allowed directories are like mount points: the guest can't move, remove or
 # replace them (else it could put a symlink there and get its target shared).
 check "allowed root can't be renamed" '! mv $A /mnt/allowed2 2>/dev/null && [ -d $A ]'

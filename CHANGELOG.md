@@ -65,6 +65,12 @@ All notable changes are listed here. The format follows
   allowlist, and checks the `/System/Volumes/Data` spelling of home too.
 - The health check has an overall deadline on control-socket replies and
   needs Python 3.11+.
+- Mac files keep owner read/write (rwx for directories), so the xattrs that
+  hold the guest's view stay readable. A guest `chmod 000` can be undone, and
+  write-only files can be created.
+- A failed CREATE no longer leaks its host fd. `O_CREAT` opens count as
+  writes.
+- `~/bin` and `~/Applications` can't be shared.
 
 ## [0.1.0] - 2026-10-17
 
