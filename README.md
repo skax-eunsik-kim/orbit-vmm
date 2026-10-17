@@ -101,8 +101,9 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
 
 Shared directories are **writable by every container**. orbit-vmm refuses to
 share your home directory, anything above it, hidden directories (`~/.ssh`,
-`~/.orbit`, …) and `~/Library`. Containers can't rename or remove the shared
-directories themselves.
+`~/.orbit`, …) and `~/Library`. A directory inside another shared one is
+dropped, since the outer one already covers it. Containers can't rename or
+remove the shared directories themselves.
 
 - Mac edits are visible in containers within about 0.5 s.
 - Mac edits and new files raise `IN_MODIFY` / `IN_CLOSE_WRITE` in containers

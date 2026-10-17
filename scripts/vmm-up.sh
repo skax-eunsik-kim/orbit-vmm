@@ -35,11 +35,23 @@ IFS=: read -ra dirs <<< "${ORBIT_SHARE_ALLOW:-}"
 for d in "${dirs[@]}"; do
   [ -n "$d" ] || continue
   r="$(realpath "$d" 2>/dev/null)" && [ -d "$r" ] || { echo "shared directory $d does not exist" >&2; exit 1; }
-  ALLOW+=(--share-allow "$r"); REAL+=("$r")
+  REAL+=("$r")
+done
+# One directory inside another is already shared by the outer one (and the VMM
+# refuses nested entries), so keep only the outermost.
+for r in ${REAL[@]+"${REAL[@]}"}; do
+  inner=0
+  for o in "${REAL[@]}"; do
+    lr=$(printf %s "$r" | tr '[:upper:]' '[:lower:]'); lo=$(printf %s "$o" | tr '[:upper:]' '[:lower:]')
+    case "$lr" in "$lo"/*) inner=1 ;; esac
+  done
+  [ $inner = 1 ] && continue
+  case " ${ALLOW[*]-} " in *" $r "*) continue ;; esac
+  ALLOW+=(--share-allow "$r")
   case "$VMM" in "$r"/*) echo "warning: running $VMM from inside shared $r; containers could replace it (use make install)" >&2 ;; esac
 done
 if [ ${#ALLOW[@]} -eq 0 ]; then echo "no shared directories (set ORBIT_SHARE_ALLOW)" >&2; exit 1; fi
-printf '%s\n' "${REAL[@]}" > "$D/shares"
+for ((i = 1; i < ${#ALLOW[@]}; i += 2)); do printf '%s\n' "${ALLOW[i]}"; done > "$D/shares"
 
 NET_OPTS=()
 [ "${ORBIT_HOST_LOOPBACK:-1}" = 0 ] && NET_OPTS+=(--no-host-loopback)

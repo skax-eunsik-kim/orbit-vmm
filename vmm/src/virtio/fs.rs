@@ -128,6 +128,12 @@ const ENOMEM: i32 = 12;
 /// Bounds on what the guest can make us hold: nodes it looked up and never
 /// forgot, and directory listings cached in open directory handles.
 const MAX_NODES: usize = 4 << 20;
+/// Total bytes of node paths (each is stored twice). Paths below a share are
+/// unbounded in depth (we walk them with openat), so this needs its own limit.
+const MAX_NODE_PATH_BYTES: usize = 256 << 20;
+/// Longest path the guest may use below the share, like Linux's PATH_MAX.
+const MAX_PATH_BYTES: usize = 4096;
+const ENAMETOOLONG: i32 = 36;
 const MAX_DIR_CACHE_BYTES: usize = 512 << 20;
 
 /// Attribute cache lifetime in ms (ORBIT_FS_ATTR_TTL_MS, default 500). File
@@ -351,6 +357,8 @@ struct Tables {
     nodes: HashMap<u64, Node>,
     by_path: HashMap<PathBuf, u64>,
     next_node: u64,
+    /// Sum of `nodes[*].path` lengths.
+    path_bytes: usize,
 }
 
 struct Server {
@@ -393,7 +401,11 @@ impl Server {
         if name.is_empty() || name == "." || name == ".." || name.as_bytes().contains(&b'/') {
             return Err(EINVAL);
         }
-        Ok(self.path(parent)?.join(name))
+        let p = self.path(parent)?.join(name);
+        if p.as_os_str().len() > self.root.path().as_os_str().len() + MAX_PATH_BYTES {
+            return Err(ENAMETOOLONG);
+        }
+        Ok(p)
     }
 
     /// Paths outside the allowlist don't exist as far as the guest can tell.
@@ -436,9 +448,11 @@ impl Server {
         let id = match t.by_path.get(&path) {
             Some(&id) => id,
             None if t.nodes.len() >= MAX_NODES => return None,
+            None if t.path_bytes + path.as_os_str().len() > MAX_NODE_PATH_BYTES => return None,
             None => {
                 let id = t.next_node;
                 t.next_node += 1;
+                t.path_bytes += path.as_os_str().len();
                 t.by_path.insert(path.clone(), id);
                 t.nodes.insert(id, Node { path, lookups: 0 });
                 id
@@ -467,6 +481,7 @@ impl Server {
             entry.lookups = entry.lookups.saturating_sub(n);
             if entry.lookups == 0 {
                 let path = t.nodes.remove(&node).unwrap().path;
+                t.path_bytes -= path.as_os_str().len();
                 if t.by_path.get(&path) == Some(&node) {
                     t.by_path.remove(&path);
                 }
@@ -882,17 +897,14 @@ impl Server {
         let mut t = self.tables.lock().unwrap();
         self.root.rename(&from, &to, darwin_flags)?;
         if flags == RENAME_EXCHANGE {
-            let tmp = from.with_extension("orbit-swap-tmp");
-            repoint(&mut t, &from, &tmp);
-            repoint(&mut t, &to, &from);
-            repoint(&mut t, &tmp, &to);
+            repoint(&mut t, &[(&from, &to), (&to, &from)]);
         } else {
             // Whatever `to` was is gone; its nodes are stale.
             let stale: Vec<PathBuf> = t.by_path.keys().filter(|p| p.starts_with(&to)).cloned().collect();
             for p in stale {
                 t.by_path.remove(&p);
             }
-            repoint(&mut t, &from, &to);
+            repoint(&mut t, &[(&from, &to)]);
         }
         Ok(Vec::new())
     }
@@ -976,17 +988,25 @@ impl Server {
     }
 }
 
-/// Re-points the node at `from` and everything below it to `to`.
-fn repoint(t: &mut Tables, from: &Path, to: &Path) {
-    let moved: Vec<(PathBuf, u64)> =
-        t.by_path.iter().filter(|(p, _)| p.starts_with(from)).map(|(p, id)| (p.clone(), *id)).collect();
-    for (old, id) in moved {
-        // join("") would append a trailing slash and turn the file into a "directory".
-        let rel = old.strip_prefix(from).unwrap();
-        let new = if rel.as_os_str().is_empty() { to.to_path_buf() } else { to.join(rel) };
-        t.by_path.remove(&old);
+/// Re-points, for each (from, to), the node at `from` and everything below it
+/// to `to`. All moves are computed first, so an exchange is just both pairs.
+fn repoint(t: &mut Tables, moves: &[(&Path, &Path)]) {
+    let mut moved = Vec::new();
+    for &(from, to) in moves {
+        for (old, id) in t.by_path.iter().filter(|(p, _)| p.starts_with(from)) {
+            // join("") would append a trailing slash and turn the file into a "directory".
+            let rel = old.strip_prefix(from).unwrap();
+            let new = if rel.as_os_str().is_empty() { to.to_path_buf() } else { to.join(rel) };
+            moved.push((old.clone(), new, *id));
+        }
+    }
+    for (old, _, _) in &moved {
+        t.by_path.remove(old);
+    }
+    for (_, new, id) in moved {
         t.by_path.insert(new.clone(), id);
         if let Some(n) = t.nodes.get_mut(&id) {
+            t.path_bytes = t.path_bytes - n.path.as_os_str().len() + new.as_os_str().len();
             n.path = new;
         }
     }

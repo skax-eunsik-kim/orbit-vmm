@@ -162,8 +162,12 @@ pub fn selftest() -> i32 {
 /// either end stay resident (a 16 KiB host page may still hold live 4 KiB guest
 /// pages). Returns the number of bytes released.
 pub fn release_range(mem: &GuestMemory, gpa: u64, len: u64) -> u64 {
-    let start = gpa.next_multiple_of(HOST_PAGE_SIZE);
-    let end = (gpa + len) / HOST_PAGE_SIZE * HOST_PAGE_SIZE;
+    let Some(start) = gpa.checked_next_multiple_of(HOST_PAGE_SIZE) else {
+        return 0;
+    };
+    let Some(end) = gpa.checked_add(len).map(|e| e / HOST_PAGE_SIZE * HOST_PAGE_SIZE) else {
+        return 0; // guest-supplied range wraps
+    };
     if end <= start {
         return 0;
     }

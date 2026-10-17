@@ -240,6 +240,7 @@ extern "C" fn cb_get_revents(idx: i32, opaque: *mut c_void) -> i32 {
 /// frames (wake the loop by writing a byte to `wake_write`); `deliver` is
 /// called with network → guest frames.
 pub fn run(tx: Receiver<NetMsg>, wake_read: RawFd, forwards: Vec<Forward>, host_loopback: bool, deliver: Deliver) {
+    let mut warned = std::collections::HashSet::new();
     let mut ctx = Box::new(Ctx { deliver, start: Instant::now(), timers: Vec::new(), pollfds: Vec::new() });
     let cfg = SlirpConfig {
         version: 4,
@@ -333,7 +334,10 @@ pub fn run(tx: Receiver<NetMsg>, wake_read: RawFd, forwards: Vec<Forward>, host_
                         }
                     };
                     if add && rc != 0 {
-                        eprintln!("orbit-vmm: cannot forward localhost:{port} (port in use on the Mac?)");
+                        // Once per port: a guest flapping listeners mustn't flood the log.
+                        if warned.insert(port) {
+                            eprintln!("orbit-vmm: cannot forward localhost:{port} (port in use on the Mac?)");
+                        }
                     } else if std::env::var_os("ORBIT_DEBUG").is_some() {
                         eprintln!(
                             "orbit-vmm: {} localhost:{port}",

@@ -102,6 +102,10 @@ pub fn fstat(f: &impl AsRawFd) -> Result<Attr, i32> {
     Ok(Attr::from_stat(&st))
 }
 
+fn lower(p: &Path) -> PathBuf {
+    PathBuf::from(OsStr::from_bytes(&p.as_os_str().as_bytes().to_ascii_lowercase()))
+}
+
 /// Containers can write to shared directories, so sharing these would let
 /// them run code on the Mac (shell profiles, LaunchAgents, ~/.orbit/bin) or
 /// read credentials (~/.ssh and other dot-directories).
@@ -138,7 +142,10 @@ impl Root {
         if fd < 0 {
             return Err(format!("opening share {}: {}", path.display(), std::io::Error::last_os_error()));
         }
-        let home = std::env::var_os("HOME").map(PathBuf::from).and_then(|h| h.canonicalize().ok());
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .and_then(|h| h.canonicalize().ok())
+            .ok_or("HOME is not set or does not exist")?;
         let mut allowed = Vec::new();
         for a in allow {
             // Allowed directories must exist, lie inside the share, and be given
@@ -151,10 +158,21 @@ impl Root {
             if !c.starts_with(path) {
                 return Err(format!("allowed path {} is outside the share {}", c.display(), path.display()));
             }
-            if let Some(why) = home.as_deref().and_then(|h| unsafe_share(h, &c)) {
+            if let Some(why) = unsafe_share(&home, &c) {
                 return Err(format!("refusing to share {}: {why}", c.display()));
             }
             allowed.push(c);
+        }
+        // No allowed directory inside another: the outer one would make the
+        // inner one's parents writable, and the guest could swap them for symlinks.
+        for a in &allowed {
+            if let Some(b) = allowed.iter().find(|b| *b != a && lower(b).starts_with(lower(a))) {
+                return Err(format!(
+                    "allowed paths {} and {} are nested; list only the outer one",
+                    a.display(),
+                    b.display()
+                ));
+            }
         }
         Ok(Root { path: path.to_path_buf(), fd: unsafe { OwnedFd::from_raw_fd(fd) }, allow: allowed })
     }
@@ -163,9 +181,12 @@ impl Root {
         &self.path
     }
 
-    /// Whether `p` is one of the allowed directories itself.
+    /// Whether `p` is one of the allowed directories or above one, compared
+    /// case-insensitively like APFS. Renaming or removing such a path would
+    /// change what gets shared on the next start.
     pub fn is_allowed_root(&self, p: &Path) -> bool {
-        self.allow.iter().any(|a| a == p)
+        let p = lower(p);
+        self.allow.iter().any(|a| lower(a).starts_with(&p))
     }
 
     pub fn access(&self, p: &Path) -> Access {

@@ -40,6 +40,14 @@ All notable changes are listed here. The format follows
   - the guest-to-network frame queue (4096 frames)
   - console output (256 MiB)
 - CI uses a pinned Rust toolchain.
+- Nested allowed directories are refused by the VMM; `vmm-up.sh` keeps only
+  the outermost. The guest can't rename paths above an allowed directory,
+  in any letter case.
+- Guest paths below a share are capped at 4096 bytes, and node paths at
+  256 MiB in total.
+- RENAME_EXCHANGE swaps node paths directly.
+- The "port in use" warning is printed once per port.
+- The balloon range uses checked math.
 
 ## [0.1.0] - 2026-10-17
 
