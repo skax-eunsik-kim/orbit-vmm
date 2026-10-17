@@ -71,6 +71,9 @@ All notable changes are listed here. The format follows
 - A failed CREATE no longer leaks its host fd. `O_CREAT` opens count as
   writes.
 - `~/bin` and `~/Applications` can't be shared.
+- CREATE sets the guest's owner and mode only on files it really created,
+  and it can't target an allowed directory. OPEN never creates. The
+  temporary owner unlock in SETATTR only ever applies safe bits.
 
 ## [0.1.0] - 2026-10-17
 

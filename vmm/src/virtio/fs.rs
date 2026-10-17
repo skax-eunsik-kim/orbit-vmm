@@ -752,7 +752,8 @@ impl Server {
                 // A write-mode open drops the guest's cached pages; fsnotify
                 // relies on that to make injected events see fresh content.
                 let keep = if flags & 3 == 0 { FOPEN_KEEP_CACHE } else { 0 };
-                self.path(node).and_then(|p| self.open(&p, flags, None)).map(|fh| open_out(fh, keep))
+                // OPEN never creates (that is CREATE): drop O_CREAT/O_EXCL.
+                self.path(node).and_then(|p| self.open(&p, flags & !0o300, None)).map(|fh| open_out(fh, keep))
             }
             FUSE_CREATE => {
                 let flags = r.u32();
@@ -761,8 +762,20 @@ impl Server {
                 r.skip(4);
                 let name = r.name();
                 self.child(node, name).and_then(|p| {
-                    let fh = self.open(&p, flags | 0o100, Some(host_mode(mode & !umask, REG)))?;
-                    let done = self.created(&p, caller, Some(mode & !umask)).and_then(|_| self.entry(p));
+                    self.replaceable(&p)?;
+                    // Only a file this call really created gets the guest's owner
+                    // and mode; opening an existing one leaves them alone.
+                    let host = Some(host_mode(mode & !umask, REG));
+                    let (fh, new) = match self.open(&p, flags | 0o300, host) {
+                        Ok(fh) => (fh, true),
+                        Err(EEXIST) if flags & 0o200 == 0 => (self.open(&p, flags & !0o100, None)?, false),
+                        Err(e) => return Err(e),
+                    };
+                    let done = if new {
+                        self.created(&p, caller, Some(mode & !umask)).and_then(|_| self.entry(p))
+                    } else {
+                        self.entry(p)
+                    };
                     match done {
                         Ok(mut out) => {
                             out.extend_from_slice(&open_out(fh, 0));
@@ -1021,7 +1034,7 @@ impl Server {
             let real = self.root.lstat(&path)?.mode;
             let unlock = owner_access(real);
             if !root_dir && emulate_ownership() && real & unlock != unlock {
-                self.root.chmod(&path, (real & 0o7777) | unlock)?;
+                self.root.chmod(&path, host_mode(real, real))?;
             }
             // From now on the guest owns this file's mode: pin its owner record
             // so the exact mode it set is what it sees.

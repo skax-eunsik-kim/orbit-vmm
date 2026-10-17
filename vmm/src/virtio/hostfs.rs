@@ -385,14 +385,8 @@ impl Root {
     /// opened as itself, never followed).
     fn xattr_fd(&self, p: &Path) -> Result<OwnedFd, i32> {
         let (dir, name) = self.parent(p)?;
-        match openat(dir.as_raw_fd(), &name, libc::O_RDONLY | libc::O_SYMLINK | libc::O_NONBLOCK, 0) {
-            // Unreadable (e.g. mode 0200 or 000): an event-only fd needs no read
-            // permission and still works for xattrs.
-            Err(libc::EACCES) => {
-                openat(dir.as_raw_fd(), &name, libc::O_EVTONLY | libc::O_SYMLINK | libc::O_NONBLOCK, 0)
-            }
-            other => other,
-        }
+        // Needs owner read access: Mac files we manage always keep it (host_mode).
+        openat(dir.as_raw_fd(), &name, libc::O_RDONLY | libc::O_SYMLINK | libc::O_NONBLOCK, 0)
     }
 
     pub fn get_xattr(&self, p: &Path, key: &std::ffi::CStr) -> Option<Vec<u8>> {
