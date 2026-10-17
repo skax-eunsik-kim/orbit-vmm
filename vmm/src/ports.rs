@@ -22,7 +22,7 @@ const MAX_REPLY: u64 = 64 << 10;
 
 /// One request/reply on the control socket, bounded in size and total time
 /// (the guest is untrusted: it must not be able to stall or bloat us).
-fn ask(path: &PathBuf, line: &str) -> Option<String> {
+pub fn ask(path: &PathBuf, line: &str) -> Option<String> {
     let mut s = UnixStream::connect(path).ok()?;
     s.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
     s.write_all(line.as_bytes()).ok()?;

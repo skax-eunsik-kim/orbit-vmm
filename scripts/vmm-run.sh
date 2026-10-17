@@ -30,7 +30,15 @@ fail() { log "not starting: $*"; echo "$*" >&2; notify "Not starting: $*"; rm -f
 
 # launchd also runs us at login: start only if the VM was meant to be running.
 [ -f "$D/want-running" ] || exit 0
+# One supervisor per instance: a second one (say, the agent loading while a
+# background VM runs) must not touch the first one's pid files and logs.
+old=$(cat "$D/run.pid" 2>/dev/null)
+if [ -n "$old" ] && [ "$old" != $$ ] && ps -o command= -p "$old" 2>/dev/null | grep -q 'vmm-run\.sh'; then
+  log "another supervisor ($old) is running this instance; exiting"
+  exit 0
+fi
 echo $$ > "$D/run.pid"
+: > "$D/warnings"
 
 # Crash-loop guard. A start requested by vmm-up.sh resets the count.
 now=$(date +%s)
@@ -71,7 +79,7 @@ for ((k = 0; k < ${#REAL[@]}; k++)); do
   [ $inner = 1 ] && continue
   case " ${SHARES[*]-} " in *" $r "*) continue ;; esac
   ALLOW+=(--share-allow "${LIT[k]}"); SHARES+=("$r")
-  case "$VMM" in "$r"/*) echo "warning: running $VMM from inside shared $r; containers could replace it (use make install)" >&2 ;; esac
+  case "$VMM" in "$r"/*) echo "warning: running $VMM from inside shared $r; containers could replace it (use make install)" >> "$D/warnings" ;; esac
 done
 [ ${#ALLOW[@]} -gt 0 ] || fail "no shared directories (set ORBIT_SHARE_ALLOW)"
 printf '%s\n' "${SHARES[@]}" > "$D/shares"
@@ -79,6 +87,8 @@ printf '%s\n' "${SHARES[@]}" > "$D/shares"
 NET_OPTS=()
 [ "${ORBIT_HOST_LOOPBACK:-1}" = 0 ] && NET_OPTS+=(--no-host-loopback)
 S="$D/docker.sock"
+# `make down` may have raced this start.
+[ -f "$D/want-running" ] || { log "stop requested before start"; exit 0; }
 # Keep the previous run's console (vmm-up.sh used to overwrite it).
 [ -s "$D/console.log" ] && mv -f "$D/console.log" "$D/console.prev.log"
 "$VMM" --kernel "$HOME/.orbit/guest/kernel" --initrd "$HOME/.orbit/guest/initramfs" \
@@ -90,14 +100,16 @@ P=$!
 echo "$P" > "$D/vmm.pid"
 log "started VMM $P"
 
-ping_ok() { [ "$(printf 'ping\n' | nc -U -w 5 "$D/control.sock" 2>/dev/null)" = pong ]; }
+# Bounded in size and time (the guest is untrusted): never plain nc here.
+ctl() { "$VMM" --control "$D/control.sock" "$1" 2>/dev/null; }
+ping_ok() { [ "$(ctl ping)" = pong ]; }
 
 # Stopped by launchd (unload) or a signal: shut the guest down cleanly first.
 stopping=0
 stop() {
   stopping=1
   log "stop requested; shutting the guest down"
-  printf 'shutdown\n' | nc -U -w 3 "$D/control.sock" >/dev/null 2>&1
+  ctl shutdown >/dev/null
   for _ in $(seq 1 60); do kill -0 "$P" 2>/dev/null || return; sleep 0.5; done
   kill -TERM "$P" 2>/dev/null
 }

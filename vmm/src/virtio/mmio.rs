@@ -51,8 +51,10 @@ struct Interrupt {
 impl Interrupt {
     fn raise(&self, bit: u32) {
         let _g = self.level.lock().unwrap();
-        self.status.fetch_or(bit, Ordering::SeqCst);
-        self.irq.set_level(true);
+        // The line is high exactly while status != 0: only the first bit raises it.
+        if self.status.fetch_or(bit, Ordering::SeqCst) == 0 {
+            self.irq.set_level(true);
+        }
     }
 
     fn ack(&self, bits: u32) {

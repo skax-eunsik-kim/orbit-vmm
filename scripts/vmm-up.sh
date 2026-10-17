@@ -10,6 +10,7 @@
 #      gets its own ~/.orbit/vmm-<name> with its own disk and sockets).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "$HERE/orbit-vmm" ]; then VMM="$HERE/orbit-vmm"; else VMM="$HERE/../vmm/target/release/orbit-vmm"; fi
 D="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}"
 LABEL="com.orbit.vmm${ORBIT_INSTANCE:+.$ORBIT_INSTANCE}"
 # Owner-only: the sockets here are root in the VM.
@@ -19,7 +20,7 @@ chmod 700 "$HOME/.orbit" "$D"
 # Ask a running VM to power off cleanly; never start a second one on the same disk.
 stop_vm() {
   rm -f "$D/want-running"   # tells the watchdog this stop is on purpose
-  if [ -S "$D/control.sock" ]; then echo shutdown | nc -U -w 3 "$D/control.sock" >/dev/null 2>&1; fi
+  if [ -S "$D/control.sock" ]; then "$VMM" --control "$D/control.sock" shutdown >/dev/null 2>&1; fi
   local old sup
   old=$(cat "$D/vmm.pid" 2>/dev/null)
   sup=$(cat "$D/run.pid" 2>/dev/null)
@@ -58,7 +59,11 @@ fi
 
 S="$D/docker.sock"
 for _ in $(seq 1 600); do
-  curl -s --unix-socket "$S" http://d/_ping 2>/dev/null | grep -q OK && { echo "docker ready: export DOCKER_HOST=unix://$S"; exit 0; }
+  if curl -s -m 2 --unix-socket "$S" http://d/_ping 2>/dev/null | grep -q OK; then
+    cat "$D/warnings" >&2 2>/dev/null
+    echo "docker ready: export DOCKER_HOST=unix://$S"
+    exit 0
+  fi
   [ -f "$D/want-running" ] || { echo "VM did not start:" >&2; tail -n 3 "$D/watchdog.log" >&2; echo "see $D/console.log" >&2; exit 1; }
   sleep 0.2
 done

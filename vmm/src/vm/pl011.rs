@@ -40,6 +40,8 @@ struct Regs {
     ifls: u32,
     imsc: u32,
     ris: u32,
+    /// Last level driven on the IRQ line (each change is a GIC call and a kick).
+    level: bool,
 }
 
 pub struct Pl011 {
@@ -52,8 +54,12 @@ impl Pl011 {
         Self { regs: Mutex::new(Regs { cr: 0x300, ifls: 0x12, ..Default::default() }), irq }
     }
 
-    fn update_irq(&self, regs: &Regs) {
-        self.irq.set_level(regs.ris & regs.imsc != 0);
+    fn update_irq(&self, regs: &mut Regs) {
+        let level = regs.ris & regs.imsc != 0;
+        if level != regs.level {
+            regs.level = level;
+            self.irq.set_level(level);
+        }
     }
 }
 
@@ -115,6 +121,6 @@ impl MmioDevice for Pl011 {
             ICR => regs.ris &= !value,
             _ => {}
         }
-        self.update_irq(&regs);
+        self.update_irq(&mut regs);
     }
 }

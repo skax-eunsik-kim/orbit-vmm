@@ -100,6 +100,23 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--reclaim-selftest") {
         std::process::exit(reclaim::selftest());
     }
+    // `orbit-vmm --control <socket> <command>`: one bounded request on the guest
+    // control channel (64 KiB, 3 s), for scripts. The guest is untrusted, so
+    // they must not read its replies with plain nc.
+    if std::env::args().nth(1).as_deref() == Some("--control") {
+        let a: Vec<String> = std::env::args().skip(2).collect();
+        let [sock, cmd] = a.as_slice() else {
+            eprintln!("usage: orbit-vmm --control <socket> <command>");
+            std::process::exit(2);
+        };
+        match ports::ask(&PathBuf::from(sock), &format!("{cmd}\n")) {
+            Some(reply) => {
+                print!("{reply}");
+                std::process::exit(0);
+            }
+            None => std::process::exit(1),
+        }
+    }
     raise_fd_limit();
     let config = vm::parse_args(std::env::args().skip(1));
     std::process::exit(vm::run(config));

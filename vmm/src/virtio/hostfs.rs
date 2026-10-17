@@ -183,9 +183,18 @@ pub enum Access {
 
 pub struct Root {
     path: PathBuf,
-    fd: OwnedFd,
+    fd: std::sync::Arc<OwnedFd>,
     allow: Vec<PathBuf>,
+    /// Directory fds from earlier walks, by path. Every one was reached with
+    /// O_NOFOLLOW from the root, so using it is as safe as walking again; it
+    /// just skips one openat per path component (tens of µs each on macOS).
+    /// Entries live DIR_CACHE_TTL, so a directory moved on the Mac is
+    /// re-walked soon; the guest's own renames and rmdirs drop them at once.
+    dirs: std::sync::Mutex<std::collections::HashMap<PathBuf, (std::sync::Arc<OwnedFd>, std::time::Instant)>>,
 }
+
+const DIR_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+const DIR_CACHE_MAX: usize = 1024;
 
 impl Root {
     pub fn open(path: &Path, allow: &[PathBuf]) -> Result<Self, String> {
@@ -252,7 +261,12 @@ impl Root {
                 }
             }
         }
-        Ok(Root { path: path.to_path_buf(), fd: unsafe { OwnedFd::from_raw_fd(fd) }, allow: allowed })
+        Ok(Root {
+            path: path.to_path_buf(),
+            fd: std::sync::Arc::new(unsafe { OwnedFd::from_raw_fd(fd) }),
+            allow: allowed,
+            dirs: Default::default(),
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -288,22 +302,68 @@ impl Root {
             .collect()
     }
 
-    /// Opens the directory `p` itself, walking from the root with O_NOFOLLOW.
-    pub fn open_dir(&self, p: &Path) -> Result<OwnedFd, i32> {
-        let mut cur = openat(self.fd.as_raw_fd(), &c".".to_owned(), libc::O_RDONLY | libc::O_DIRECTORY, 0)?;
-        for comp in self.components(p)? {
-            cur = openat(cur.as_raw_fd(), &cname(comp)?, libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW, 0)?;
+    /// A (shared) fd for the directory `p`, walking from the root with
+    /// O_NOFOLLOW, through cached directories where possible. For *at() calls
+    /// only: its file offset is shared, so never read entries through it.
+    fn dir_fd(&self, p: &Path) -> Result<std::sync::Arc<OwnedFd>, i32> {
+        let comps = self.components(p)?;
+        let now = std::time::Instant::now();
+        let fresh = |d: &std::collections::HashMap<PathBuf, (std::sync::Arc<OwnedFd>, std::time::Instant)>,
+                     k: &Path| {
+            d.get(k).filter(|(_, t)| now.duration_since(*t) < DIR_CACHE_TTL).map(|(fd, _)| fd.clone())
+        };
+        if comps.is_empty() {
+            return Ok(self.fd.clone());
+        }
+        if let Some(fd) = fresh(&self.dirs.lock().unwrap(), p) {
+            return Ok(fd);
+        }
+        let mut cur = self.fd.clone();
+        let mut path = self.path.clone();
+        for comp in comps {
+            path.push(comp);
+            if let Some(fd) = fresh(&self.dirs.lock().unwrap(), &path) {
+                cur = fd;
+                continue;
+            }
+            let fd = std::sync::Arc::new(openat(
+                cur.as_raw_fd(),
+                &cname(comp)?,
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+                0,
+            )?);
+            let mut d = self.dirs.lock().unwrap();
+            if d.len() >= DIR_CACHE_MAX {
+                d.clear();
+            }
+            d.insert(path.clone(), (fd.clone(), now));
+            cur = fd;
         }
         Ok(cur)
     }
 
+    /// Forgets cached directory fds at or below `p` (it was renamed or removed).
+    pub fn forget_dirs(&self, p: &Path) {
+        self.dirs.lock().unwrap().retain(|k, _| !k.starts_with(p));
+    }
+
+    /// Opens the directory `p` itself as a new fd of its own (for listing).
+    pub fn open_dir(&self, p: &Path) -> Result<OwnedFd, i32> {
+        let (dir, name) = self.parent(p)?;
+        let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW;
+        if name.as_bytes() == b"." {
+            return openat(dir.as_raw_fd(), &name, libc::O_RDONLY | libc::O_DIRECTORY, 0);
+        }
+        openat(dir.as_raw_fd(), &name, flags, 0)
+    }
+
     /// The parent directory of `p` (opened symlink-safely) and `p`'s final name.
     /// For the share root itself: the root and ".".
-    pub fn parent(&self, p: &Path) -> Result<(OwnedFd, CString), i32> {
+    pub fn parent(&self, p: &Path) -> Result<(std::sync::Arc<OwnedFd>, CString), i32> {
         let comps = self.components(p)?;
         match comps.split_last() {
-            None => Ok((self.open_dir(&self.path)?, c".".to_owned())),
-            Some((last, _)) => Ok((self.open_dir(p.parent().ok_or(libc::EACCES)?)?, cname(last)?)),
+            None => Ok((self.fd.clone(), c".".to_owned())),
+            Some((last, _)) => Ok((self.dir_fd(p.parent().ok_or(libc::EACCES)?)?, cname(last)?)),
         }
     }
 
@@ -387,6 +447,16 @@ impl Root {
         let (dir, name) = self.parent(p)?;
         // Needs owner read access: Mac files we manage always keep it (host_mode).
         openat(dir.as_raw_fd(), &name, libc::O_RDONLY | libc::O_SYMLINK | libc::O_NONBLOCK, 0)
+    }
+
+    /// Several xattrs of `p` through one open.
+    pub fn get_xattrs<const N: usize>(&self, p: &Path, keys: [&std::ffi::CStr; N]) -> [Option<Vec<u8>>; N] {
+        let Ok(fd) = self.xattr_fd(p) else { return std::array::from_fn(|_| None) };
+        keys.map(|key| {
+            let mut buf = [0u8; 64];
+            let n = unsafe { libc::fgetxattr(fd.as_raw_fd(), key.as_ptr(), buf.as_mut_ptr().cast(), buf.len(), 0, 0) };
+            (n > 0).then(|| buf[..n as usize].to_vec())
+        })
     }
 
     pub fn get_xattr(&self, p: &Path, key: &std::ffi::CStr) -> Option<Vec<u8>> {

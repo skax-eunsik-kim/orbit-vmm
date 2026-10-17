@@ -5,6 +5,37 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Performance
+
+A metadata-heavy bind-mount workload is 10–20x faster:
+
+| Operation | Before | After |
+|---|---|---|
+| Create 5000 files | 46–83 s | 3.8 s |
+| stat 5000 files | 9–10 s | 0.6 s |
+| 1000 renames | 18–25 s | 1.7 s |
+
+- virtio-fs caches directory fds from its O_NOFOLLOW walks (1 s lifetime;
+  dropped at once on the guest's renames and rmdirs). Before, every
+  operation re-opened every directory from `/Users` down.
+- Missing paths are cached by the guest for 1 s (`ORBIT_FS_NEG_TTL_MS`).
+- Ownership and mode xattrs are read through one open.
+- Renames touch only the moved subtree (ordered node map), not every node.
+- The echo-suppression map is pruned at most once a second.
+- IRQ lines change only on transitions (virtio-mmio, PL011).
+- The net RX path copies slices.
+- Debug environment variables are read once.
+
+### Security
+
+- The supervisor and `vmm-up.sh` talk to the guest control socket only
+  through `orbit-vmm --control`, which is bounded in size (64 KiB) and time
+  (3 s), instead of `nc`. A guest could stall the watchdog or stream
+  unbounded data into it.
+- One supervisor per instance. `make down` can't race a restart.
+- `vmm-up.sh` prints warnings, such as running the VMM from a shared
+  directory, to the terminal again.
+
 ### Added
 
 - Watchdog: `scripts/install-watchdog.sh` installs a launchd agent that

@@ -106,7 +106,8 @@ share your home directory, anything above it, hidden directories (`~/.ssh`,
 dropped, since the outer one already covers it. Containers can't rename or
 remove the shared directories themselves.
 
-- Mac edits are visible in containers within about 0.5 s.
+- Mac edits to files are visible in containers within about 0.5 s. New files
+  and renamed directories show up within about 1 s.
 - Mac edits and new files raise `IN_MODIFY` / `IN_CLOSE_WRITE` in containers
   about 1 s later.
 

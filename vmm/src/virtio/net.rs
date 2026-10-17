@@ -37,15 +37,24 @@ impl Rx {
             let Some(chain) = queue.pop(&mem) else { break };
             let mut hdr = [0u8; HDR_LEN];
             hdr[10] = 1; // num_buffers
-            let mut src = hdr.iter().chain(frame.iter()).copied();
+                         // Header then frame, spread over the chain's buffers (slice copies).
+            let mut parts = [&hdr[..], &frame[..]];
             let mut written = 0u32;
             for d in chain.descs.iter().filter(|d| d.write_only) {
-                let chunk: Vec<u8> = src.by_ref().take(d.len as usize).collect();
-                if chunk.is_empty() {
+                let mut room = d.len as usize;
+                let mut at = d.addr;
+                while room > 0 {
+                    let Some(part) = parts.iter_mut().find(|p| !p.is_empty()) else { break };
+                    let n = part.len().min(room);
+                    mem.write(at, &part[..n]);
+                    *part = &part[n..];
+                    at += n as u64;
+                    room -= n;
+                    written += n as u32;
+                }
+                if parts.iter().all(|p| p.is_empty()) {
                     break;
                 }
-                mem.write(d.addr, &chunk);
-                written += chunk.len() as u32;
             }
             queue.add_used(&mem, chain.head, written);
             self.backlog.pop_front();

@@ -71,7 +71,8 @@ impl Kicker {
     /// done when `force` is set (machine stop) — doing it on every device
     /// interrupt costs every vCPU a full exit/re-entry.
     pub fn kick_all(&self) {
-        self.kick(std::env::var_os("ORBIT_EXIT_KICK").is_some());
+        static FORCE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        self.kick(*FORCE.get_or_init(|| std::env::var_os("ORBIT_EXIT_KICK").is_some()));
     }
 
     pub fn kick(&self, force: bool) {

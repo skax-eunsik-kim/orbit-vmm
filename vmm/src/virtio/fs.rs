@@ -254,6 +254,20 @@ fn put_entry(out: &mut Vec<u8>, nodeid: u64, v: Option<&View>) {
     }
 }
 
+/// A LOOKUP reply for "no such entry" that the guest may cache (nodeid 0).
+fn negative_entry() -> Vec<u8> {
+    static MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let ms = *MS.get_or_init(|| std::env::var("ORBIT_FS_NEG_TTL_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(1000));
+    let mut out = Vec::with_capacity(ENTRY_LEN);
+    for v in [0u64, 0, ms / 1000, 0] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&(((ms % 1000) * 1_000_000) as u32).to_le_bytes()); // entry_valid_nsec
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.resize(out.len() + ATTR_LEN, 0);
+    out
+}
+
 fn attr_out(v: &View) -> Vec<u8> {
     let mut out = Vec::with_capacity(104);
     let (at, at_ns) = attr_ttl();
@@ -336,12 +350,11 @@ fn view(root: &Root, path: &Path, attr: Attr) -> View {
     if !emulate_ownership() {
         return View { attr, uid: attr.uid, gid: attr.gid, mode: attr.mode };
     }
-    if let Some(v) = root.get_xattr(path, OWNER_XATTR) {
+    let [owner, recorded] = root.get_xattrs(path, [OWNER_XATTR, MODE_XATTR]);
+    if let Some(v) = owner {
         if let Some((u, g)) = std::str::from_utf8(&v).ok().and_then(|t| t.split_once(':')) {
             if let (Ok(u), Ok(g)) = (u.parse(), g.parse()) {
-                let recorded = root
-                    .get_xattr(path, MODE_XATTR)
-                    .and_then(|m| u32::from_str_radix(std::str::from_utf8(&m).ok()?, 8).ok());
+                let recorded = recorded.and_then(|m| u32::from_str_radix(std::str::from_utf8(&m).ok()?, 8).ok());
                 let mode = match recorded {
                     Some(m) => (attr.mode & libc::S_IFMT as u32) | (m & 0o7777),
                     None => attr.mode,
@@ -397,7 +410,9 @@ struct Node {
 #[derive(Default)]
 struct Tables {
     nodes: HashMap<u64, Node>,
-    by_path: HashMap<PathBuf, u64>,
+    /// Ordered, so everything below a path is one contiguous range (Path
+    /// orders by component): renames touch only the moved subtree.
+    by_path: std::collections::BTreeMap<PathBuf, u64>,
     next_node: u64,
     /// Sum of `nodes[*].path` lengths.
     path_bytes: usize,
@@ -413,7 +428,7 @@ struct Server {
     /// Host path of each open file handle (for write bookkeeping).
     handle_paths: Mutex<HashMap<u64, PathBuf>>,
     /// Paths the guest changed recently: their FSEvents are our own echo.
-    recent: Mutex<HashMap<PathBuf, std::time::Instant>>,
+    recent: Mutex<(HashMap<PathBuf, std::time::Instant>, std::time::Instant)>,
 }
 
 type Reply = Result<Vec<u8>, i32>;
@@ -431,7 +446,7 @@ impl Server {
             dir_cache: Arc::new(AtomicUsize::new(0)),
             writeback: AtomicBool::new(false),
             handle_paths: Mutex::new(HashMap::new()),
-            recent: Mutex::new(HashMap::new()),
+            recent: Mutex::new((HashMap::new(), std::time::Instant::now())),
         }
     }
 
@@ -584,14 +599,16 @@ impl Server {
     fn touched(&self, path: &Path) {
         let mut r = self.recent.lock().unwrap();
         let now = std::time::Instant::now();
-        if r.len() > 4096 {
-            r.retain(|_, t| now.duration_since(*t).as_secs() < 2);
+        // Pruning is O(n): at most once a second, not on every write.
+        if r.0.len() > 4096 && now.duration_since(r.1).as_secs() >= 1 {
+            r.0.retain(|_, t| now.duration_since(*t).as_secs() < 2);
+            r.1 = now;
         }
-        r.insert(path.to_path_buf(), now);
+        r.0.insert(path.to_path_buf(), now);
     }
 
     fn recently_touched(&self, path: &Path) -> bool {
-        self.recent.lock().unwrap().get(path).is_some_and(|t| t.elapsed().as_secs() < 2)
+        self.recent.lock().unwrap().0.get(path).is_some_and(|t| t.elapsed().as_secs() < 2)
     }
 
     /// Whether the guest knows this file or its directory (it can't be
@@ -638,7 +655,12 @@ impl Server {
             FUSE_DESTROY => Ok(Vec::new()),
             FUSE_LOOKUP => {
                 let name = r.name();
-                self.child(node, name).and_then(|p| self.entry(p))
+                // A miss is cached by the guest for a moment (module resolvers
+                // probe thousands of missing paths); its own creates replace it.
+                match self.child(node, name).and_then(|p| self.entry(p)) {
+                    Err(ENOENT) => Ok(negative_entry()),
+                    other => other,
+                }
             }
             FUSE_FORGET => {
                 self.forget(node, r.u64());
@@ -718,7 +740,9 @@ impl Server {
                 self.child(node, name)
                     .and_then(|p| {
                         self.replaceable(&p)?;
-                        self.root.unlink(&p, true)
+                        self.root.unlink(&p, true)?;
+                        self.root.forget_dirs(&p);
+                        Ok(())
                     })
                     .map(|_| Vec::new())
             }
@@ -989,9 +1013,11 @@ impl Server {
             return Err(ENOMEM);
         }
         self.root.rename(&from, &to, darwin_flags)?;
+        self.root.forget_dirs(&from);
+        self.root.forget_dirs(&to);
         if flags != RENAME_EXCHANGE {
             // Whatever `to` was is gone; its nodes are stale.
-            let stale: Vec<PathBuf> = t.by_path.keys().filter(|p| p.starts_with(&to)).cloned().collect();
+            let stale: Vec<PathBuf> = subtree(&t.by_path, &to).map(|(p, _)| p.clone()).collect();
             for p in stale {
                 t.by_path.remove(&p);
             }
@@ -1096,12 +1122,21 @@ impl Server {
     }
 }
 
+/// `p` and everything below it.
+fn subtree<'a>(
+    m: &'a std::collections::BTreeMap<PathBuf, u64>,
+    p: &'a Path,
+) -> impl Iterator<Item = (&'a PathBuf, &'a u64)> {
+    m.range::<Path, _>((std::ops::Bound::Included(p), std::ops::Bound::Unbounded))
+        .take_while(move |(k, _)| k.starts_with(p))
+}
+
 /// For each (from, to): the node at `from` and everything below it, with its
 /// path under `to`. All moves are computed first, so an exchange is both pairs.
 fn plan_moves(t: &Tables, pairs: &[(&Path, &Path)]) -> Vec<(PathBuf, PathBuf, u64)> {
     let mut moved = Vec::new();
     for &(from, to) in pairs {
-        for (old, id) in t.by_path.iter().filter(|(p, _)| p.starts_with(from)) {
+        for (old, id) in subtree(&t.by_path, from) {
             // join("") would append a trailing slash and turn the file into a "directory".
             let rel = old.strip_prefix(from).unwrap();
             let new = if rel.as_os_str().is_empty() { to.to_path_buf() } else { to.join(rel) };
@@ -1347,7 +1382,8 @@ fn serve(server: &Server, mem: &GuestMemory, descs: &[super::Descriptor]) -> u32
         return 0;
     };
     if let Err(e) = &reply {
-        if std::env::var_os("ORBIT_DEBUG").is_some() && *e != ENOENT && *e != ENOSYS {
+        static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *e != ENOENT && *e != ENOSYS && *DEBUG.get_or_init(|| std::env::var_os("ORBIT_DEBUG").is_some()) {
             eprintln!("virtiofs: op={opcode} node={node} -> errno {e}");
         }
     }
@@ -1433,5 +1469,23 @@ impl VirtioDevice for Fs {
         for w in &self.workers {
             *w.0.lock().unwrap() = Slot::default();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::subtree;
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn subtree_is_exactly_the_descendants() {
+        let m: BTreeMap<PathBuf, u64> = ["/s/a", "/s/a/b", "/s/a/b/c", "/s/a b", "/s/a0", "/s/a-x", "/s/a/z", "/s/b"]
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (PathBuf::from(p), i as u64))
+            .collect();
+        let got: Vec<_> = subtree(&m, Path::new("/s/a")).map(|(p, _)| p.to_str().unwrap()).collect();
+        assert_eq!(got, ["/s/a", "/s/a/b", "/s/a/b/c", "/s/a/z"]);
     }
 }
