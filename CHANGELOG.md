@@ -26,6 +26,20 @@ All notable changes are listed here. The format follows
 - New `ORBIT_HOST_LOOPBACK=0` (`--no-host-loopback`) cuts containers off
   from the Mac's localhost.
 - CI actions are pinned to commit SHAs.
+- The guest can no longer rename, remove or replace the allowed directories
+  themselves. Before, it could swap one for a symlink and get the link's
+  target shared on the next start.
+- The VMM checks allowlist entries itself:
+  - They must be real paths, with no symlinks and exact case.
+  - Your home directory, anything above it, hidden directories and
+    `~/Library` are refused.
+- `make up` only runs the installed copy and builds nothing.
+- More bounds on what the guest can make the VMM hold:
+  - the directory listing cache (512 MiB in total, 2M entries per directory)
+  - the node table (4M entries)
+  - the guest-to-network frame queue (4096 frames)
+  - console output (256 MiB)
+- CI uses a pinned Rust toolchain.
 
 ## [0.1.0] - 2026-10-17
 

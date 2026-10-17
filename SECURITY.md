@@ -32,8 +32,10 @@ These are deliberate trade-offs, documented so you can decide for yourself:
 - **Shared directories are writable from the guest.** A container can modify
   anything in them, including source code and build scripts you later run on
   the Mac. orbit-vmm itself runs from `~/.orbit/bin` (`make install`), not from
-  the checkout. `vmm-up.sh` refuses to share your home directory or anything
-  that contains it.
+  the checkout, and `make up` builds nothing. The VMM refuses to share your
+  home directory or anything above it, hidden directories, or `~/Library`. It
+  also never lets the guest rename, remove or replace the shared directories
+  themselves.
 - **Containers can reach the Mac's localhost services**
   (`host.docker.internal`, like Docker Desktop). Turn this off with
   `ORBIT_HOST_LOOPBACK=0`.

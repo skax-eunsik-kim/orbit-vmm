@@ -154,9 +154,10 @@ class Run:
         parent = shared_parent(self.dir)
         if not parent:
             return False, "no shared directory recorded; restart the VM with vmm-up.sh"
-        # The shared directory itself can't be replaced from the guest (its
-        # parent isn't shared), so it is a safe anchor.
-        pfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        # The shared directory itself can't be replaced from the guest (the VMM
+        # refuses to rename or remove allowed directories, and vmm-up.sh records
+        # their real paths); O_NOFOLLOW makes sure of the last step anyway.
+        pfd = os.open(parent, DIR_FLAGS)
         try:
             try:
                 os.mkdir(SCRATCH, 0o700, dir_fd=pfd)

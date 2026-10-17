@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 use std::os::fd::RawFd;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
 
 use super::{Queue, VirtioDevice, VirtioInterrupt, VIRTIO_F_VERSION_1};
@@ -59,7 +59,7 @@ impl Rx {
 
 #[derive(Clone)]
 pub struct PortControl {
-    tx: Sender<NetMsg>,
+    tx: SyncSender<NetMsg>,
     wake: RawFd,
 }
 
@@ -76,7 +76,7 @@ pub struct Net {
     tx_queue: Option<Queue>,
     tx_mem: Option<Arc<GuestMemory>>,
     tx_interrupt: Option<Arc<dyn VirtioInterrupt>>,
-    to_slirp: Sender<NetMsg>,
+    to_slirp: SyncSender<NetMsg>,
     wake_write: RawFd,
 }
 
@@ -84,7 +84,9 @@ impl Net {
     /// Starts the slirp network thread and returns the device.
     pub fn new(forwards: Vec<Forward>, host_loopback: bool) -> Self {
         let rx = Arc::new(Mutex::new(Rx::default()));
-        let (to_slirp, from_guest) = channel::<NetMsg>();
+        // Bounded: if the network thread falls behind, guest frames are dropped
+        // (like a full NIC queue) instead of piling up in memory.
+        let (to_slirp, from_guest) = sync_channel::<NetMsg>(4096);
         let mut fds = [0; 2];
         unsafe { libc::pipe(fds.as_mut_ptr()) };
         for fd in fds {
@@ -132,7 +134,7 @@ impl Net {
             // No offloads are negotiated, so frames are at most MTU-sized; allow GSO-sized slack.
             let mut frame = super::queue::read_readable(&mem, &chain.descs, HDR_LEN + 65_550).unwrap_or_default();
             if frame.len() > HDR_LEN {
-                let _ = self.to_slirp.send(NetMsg::Frame(frame.split_off(HDR_LEN)));
+                let _ = self.to_slirp.try_send(NetMsg::Frame(frame.split_off(HDR_LEN)));
             }
             queue.add_used(&mem, chain.head, 0);
             used = true;

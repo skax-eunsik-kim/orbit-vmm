@@ -8,8 +8,8 @@ SH_FILES := $(shell git ls-files '*.sh' guest/init 'guest/etc/orbit/*' 'vmm/gues
 help:
 	@echo "make guest    download + build the guest kernel/initramfs (~/.orbit/guest)"
 	@echo "make build    build and sign vmm/target/release/orbit-vmm"
-	@echo "make install  copy the VMM and scripts to ~/.orbit/bin (outside shared dirs)"
-	@echo "make up       install, then (re)start the VM"
+	@echo "make install  build, then copy the VMM and scripts to ~/.orbit/bin (outside shared dirs)"
+	@echo "make up       (re)start the VM from ~/.orbit/bin (builds nothing)"
 	@echo "make down     shut the VM down"
 	@echo "make lint     cargo fmt --check, clippy -D warnings, shellcheck"
 	@echo "make test     cargo test"
@@ -24,7 +24,10 @@ build:
 install: build
 	./scripts/install.sh
 
-up: install
+# Runs only the installed copy: the checkout may be in a shared directory that
+# containers can write to, so restarting must not build or run anything from it.
+up:
+	@test -x $(HOME)/.orbit/bin/vmm-up.sh || { echo "run make install first"; exit 1; }
 	$(HOME)/.orbit/bin/vmm-up.sh
 
 down:

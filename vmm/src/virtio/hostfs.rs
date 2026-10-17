@@ -102,6 +102,21 @@ pub fn fstat(f: &impl AsRawFd) -> Result<Attr, i32> {
     Ok(Attr::from_stat(&st))
 }
 
+/// Containers can write to shared directories, so sharing these would let
+/// them run code on the Mac (shell profiles, LaunchAgents, ~/.orbit/bin) or
+/// read credentials (~/.ssh and other dot-directories).
+fn unsafe_share(home: &Path, dir: &Path) -> Option<&'static str> {
+    if home.starts_with(dir) {
+        return Some("it contains your home directory");
+    }
+    let first = dir.strip_prefix(home).ok()?.components().next()?;
+    let name = first.as_os_str().as_bytes();
+    if name.starts_with(b".") || name.eq_ignore_ascii_case(b"Library") {
+        return Some("it is (inside) a hidden directory or ~/Library");
+    }
+    None
+}
+
 pub enum Access {
     /// Inside an allowed directory (or no allowlist): everything goes.
     Full,
@@ -123,20 +138,34 @@ impl Root {
         if fd < 0 {
             return Err(format!("opening share {}: {}", path.display(), std::io::Error::last_os_error()));
         }
+        let home = std::env::var_os("HOME").map(PathBuf::from).and_then(|h| h.canonicalize().ok());
         let mut allowed = Vec::new();
         for a in allow {
-            // Allowed directories must exist and lie inside the share.
-            match a.canonicalize() {
-                Ok(c) if c.starts_with(path) => allowed.push(c),
-                Ok(c) => return Err(format!("allowed path {} is outside the share {}", c.display(), path.display())),
-                Err(e) => return Err(format!("allowed path {}: {e}", a.display())),
+            // Allowed directories must exist, lie inside the share, and be given
+            // by their real path: no symlinks, exact case. (A symlink there could
+            // later be repointed; a case variant could slip past the checks below.)
+            let c = a.canonicalize().map_err(|e| format!("allowed path {}: {e}", a.display()))?;
+            if c != *a {
+                return Err(format!("allowed path {} must be given as its real path {}", a.display(), c.display()));
             }
+            if !c.starts_with(path) {
+                return Err(format!("allowed path {} is outside the share {}", c.display(), path.display()));
+            }
+            if let Some(why) = home.as_deref().and_then(|h| unsafe_share(h, &c)) {
+                return Err(format!("refusing to share {}: {why}", c.display()));
+            }
+            allowed.push(c);
         }
         Ok(Root { path: path.to_path_buf(), fd: unsafe { OwnedFd::from_raw_fd(fd) }, allow: allowed })
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Whether `p` is one of the allowed directories itself.
+    pub fn is_allowed_root(&self, p: &Path) -> bool {
+        self.allow.iter().any(|a| a == p)
     }
 
     pub fn access(&self, p: &Path) -> Access {
@@ -282,6 +311,9 @@ impl Root {
 }
 
 /// Entries of an open directory: (ino, dirent type, name), without "." / "..".
+/// More entries than this in one directory is a guest trying to exhaust our memory.
+const MAX_DIR_ENTRIES: usize = 2 << 20;
+
 pub fn list_dir(dir: &OwnedFd) -> Result<Vec<(u64, u32, Vec<u8>)>, i32> {
     // fdopendir takes ownership of the fd it is given, so hand it a duplicate.
     let dup = unsafe { libc::dup(dir.as_raw_fd()) };
@@ -305,8 +337,31 @@ pub fn list_dir(dir: &OwnedFd) -> Result<Vec<(u64, u32, Vec<u8>)>, i32> {
         if name == b"." || name == b".." {
             continue;
         }
+        if out.len() >= MAX_DIR_ENTRIES {
+            unsafe { libc::closedir(d) };
+            return Err(libc::ENOMEM);
+        }
         out.push((e.d_ino, e.d_type as u32, name.to_vec()));
     }
     unsafe { libc::closedir(d) };
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unsafe_share;
+    use std::path::Path;
+
+    #[test]
+    fn refuses_home_and_sensitive_dirs() {
+        let h = Path::new("/Users/me");
+        for bad in
+            ["/", "/Users", "/Users/me", "/Users/me/.orbit/bin", "/Users/me/.ssh", "/Users/me/Library/LaunchAgents"]
+        {
+            assert!(unsafe_share(h, Path::new(bad)).is_some(), "{bad}");
+        }
+        for ok in ["/Users/me/work", "/Users/me/src/a.b", "/Users/other"] {
+            assert!(unsafe_share(h, Path::new(ok)).is_none(), "{ok}");
+        }
+    }
 }

@@ -24,7 +24,7 @@ use std::io::ErrorKind;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use super::hostfs::{self, Access, Attr, Root};
@@ -122,6 +122,13 @@ const EEXIST: i32 = 17;
 const EINVAL: i32 = 22;
 const ENOSYS: i32 = 38;
 const EMFILE: i32 = 24;
+const EBUSY: i32 = 16;
+const ENOMEM: i32 = 12;
+
+/// Bounds on what the guest can make us hold: nodes it looked up and never
+/// forgot, and directory listings cached in open directory handles.
+const MAX_NODES: usize = 4 << 20;
+const MAX_DIR_CACHE_BYTES: usize = 512 << 20;
 
 /// Attribute cache lifetime in ms (ORBIT_FS_ATTR_TTL_MS, default 500). File
 /// content changes made on the Mac are noticed when attributes are refreshed
@@ -317,7 +324,21 @@ fn set_owner(root: &Root, path: &Path, owner: (u32, u32)) -> Result<(), i32> {
 
 enum Handle {
     File(File),
-    Dir { path: PathBuf, fd: std::os::fd::OwnedFd, entries: Vec<(u64, u32, Vec<u8>)> }, // (ino, dirent type, name)
+    Dir {
+        path: PathBuf,
+        fd: std::os::fd::OwnedFd,
+        entries: Vec<(u64, u32, Vec<u8>)>, // (ino, dirent type, name)
+        _charge: Charge,
+    },
+}
+
+/// Bytes of cached directory listing, given back when the handle goes away.
+struct Charge(Arc<AtomicUsize>, usize);
+
+impl Drop for Charge {
+    fn drop(&mut self) {
+        self.0.fetch_sub(self.1, Ordering::Relaxed);
+    }
 }
 
 struct Node {
@@ -337,6 +358,7 @@ struct Server {
     tables: Mutex<Tables>,
     handles: Mutex<HashMap<u64, Arc<Handle>>>,
     next_handle: AtomicU64,
+    dir_cache: Arc<AtomicUsize>,
     writeback: AtomicBool,
     /// Host path of each open file handle (for write bookkeeping).
     handle_paths: Mutex<HashMap<u64, PathBuf>>,
@@ -356,6 +378,7 @@ impl Server {
             tables: Mutex::new(t),
             handles: Mutex::new(HashMap::new()),
             next_handle: AtomicU64::new(1),
+            dir_cache: Arc::new(AtomicUsize::new(0)),
             writeback: AtomicBool::new(false),
             handle_paths: Mutex::new(HashMap::new()),
             recent: Mutex::new(HashMap::new()),
@@ -390,15 +413,29 @@ impl Server {
         }
     }
 
+    /// Creating, removing or renaming the entry `p` also needs `p` not to be an
+    /// allowed directory itself: those are like mount points. Otherwise the
+    /// guest could swap `~/work` for a symlink to somewhere else and get that
+    /// shared on the next start.
+    fn replaceable(&self, p: &Path) -> Result<(), i32> {
+        self.writable(p)?;
+        if self.root.is_allowed_root(p) {
+            return Err(EBUSY);
+        }
+        Ok(())
+    }
+
     fn view(&self, p: &Path) -> Result<View, i32> {
         Ok(view(&self.root, p, self.root.lstat(p)?))
     }
 
-    /// Counts one guest lookup of `path` and returns its node id.
-    fn remember(&self, path: PathBuf) -> u64 {
+    /// Counts one guest lookup of `path` and returns its node id (None when the
+    /// table is full: the guest is looking things up without ever forgetting).
+    fn remember(&self, path: PathBuf) -> Option<u64> {
         let mut t = self.tables.lock().unwrap();
         let id = match t.by_path.get(&path) {
             Some(&id) => id,
+            None if t.nodes.len() >= MAX_NODES => return None,
             None => {
                 let id = t.next_node;
                 t.next_node += 1;
@@ -408,14 +445,14 @@ impl Server {
             }
         };
         t.nodes.get_mut(&id).unwrap().lookups += 1;
-        id
+        Some(id)
     }
 
     /// Registers a lookup of `path` and returns the FUSE entry reply.
     fn entry(&self, path: PathBuf) -> Reply {
         self.visible(&path)?;
         let v = self.view(&path)?;
-        let id = self.remember(path);
+        let id = self.remember(path).ok_or(ENOMEM)?;
         let mut out = Vec::with_capacity(ENTRY_LEN);
         put_entry(&mut out, id, Some(&v));
         Ok(out)
@@ -567,7 +604,7 @@ impl Server {
                 let name = r.name().to_owned();
                 let target = r.name().to_owned();
                 self.child(node, &name).and_then(|p| {
-                    self.writable(&p)?;
+                    self.replaceable(&p)?;
                     self.root.symlink(&target, &p)?;
                     self.created(&p, caller)?;
                     self.entry(p)
@@ -581,7 +618,7 @@ impl Server {
                     Err(EPERM) // no device nodes / fifos on the host share
                 } else {
                     self.child(node, name).and_then(|p| {
-                        self.writable(&p)?;
+                        self.replaceable(&p)?;
                         self.root.open_file(&p, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, mode & 0o7777)?;
                         self.created(&p, caller)?;
                         self.entry(p)
@@ -593,7 +630,7 @@ impl Server {
                 let umask = r.u32();
                 let name = r.name();
                 self.child(node, name).and_then(|p| {
-                    self.writable(&p)?;
+                    self.replaceable(&p)?;
                     self.root.mkdir(&p, mode & !umask & 0o7777)?;
                     self.created(&p, caller)?;
                     self.entry(p)
@@ -603,7 +640,7 @@ impl Server {
                 let name = r.name();
                 self.child(node, name)
                     .and_then(|p| {
-                        self.writable(&p)?;
+                        self.replaceable(&p)?;
                         self.touched(&p);
                         self.root.unlink(&p, false)
                     })
@@ -613,7 +650,7 @@ impl Server {
                 let name = r.name();
                 self.child(node, name)
                     .and_then(|p| {
-                        self.writable(&p)?;
+                        self.replaceable(&p)?;
                         self.root.unlink(&p, true)
                     })
                     .map(|_| Vec::new())
@@ -637,7 +674,7 @@ impl Server {
                 self.path(old).and_then(|src| {
                     let dst = self.child(node, name)?;
                     self.writable(&src)?;
-                    self.writable(&dst)?;
+                    self.replaceable(&dst)?;
                     self.root.link(&src, &dst)?;
                     self.touched(&dst);
                     self.entry(dst)
@@ -719,7 +756,7 @@ impl Server {
                 let offset = r.u64() as usize;
                 let size = r.u32() as usize;
                 match self.get_handle(fh).as_deref() {
-                    Ok(Handle::Dir { path, fd, entries }) if opcode == FUSE_READDIRPLUS => {
+                    Ok(Handle::Dir { path, fd, entries, .. }) if opcode == FUSE_READDIRPLUS => {
                         Ok(self.readdirplus_out(path, fd, entries, offset, size))
                     }
                     Ok(Handle::Dir { entries, .. }) => Ok(readdir_out(entries, offset, size)),
@@ -779,7 +816,13 @@ impl Server {
             }
             entries.push((ino, kind, name));
         }
-        Ok(self.add_handle(Handle::Dir { path, fd, entries }))
+        let bytes: usize = entries.iter().map(|e| e.2.len() + 40).sum();
+        if self.dir_cache.fetch_add(bytes, Ordering::Relaxed) + bytes > MAX_DIR_CACHE_BYTES {
+            self.dir_cache.fetch_sub(bytes, Ordering::Relaxed);
+            return Err(ENOMEM);
+        }
+        let charge = Charge(self.dir_cache.clone(), bytes);
+        Ok(self.add_handle(Handle::Dir { path, fd, entries, _charge: charge }))
     }
 
     /// fuse_direntplus records: an entry reply (which counts as a lookup) + dirent.
@@ -808,8 +851,10 @@ impl Server {
             match attr {
                 Some(a) => {
                     let v = view(&self.root, &path, a);
-                    let id = self.remember(path);
-                    put_entry(&mut out, id, Some(&v));
+                    match self.remember(path) {
+                        Some(id) => put_entry(&mut out, id, Some(&v)),
+                        None => put_entry(&mut out, 0, None), // node table full: no lookup
+                    }
                 }
                 None => put_entry(&mut out, 0, None), // vanished or ./..: no lookup
             }
@@ -823,8 +868,8 @@ impl Server {
         const RENAME_EXCHANGE: u32 = 2;
         let from = self.child(olddir, old)?;
         let to = self.child(newdir, new)?;
-        self.writable(&from)?;
-        self.writable(&to)?;
+        self.replaceable(&from)?;
+        self.replaceable(&to)?;
         self.touched(&from);
         self.touched(&to);
         let darwin_flags = match flags {

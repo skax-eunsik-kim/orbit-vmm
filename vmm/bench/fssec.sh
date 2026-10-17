@@ -7,6 +7,20 @@ S=$HERE/bench/fssec-share; O=$(mktemp -d "${TMPDIR:-/tmp}/orbit-outside.XXXXXX")
 rm -rf "$S" "$O"; mkdir -p "$S/allowed/swap" "$O"
 echo hello > "$S/allowed/file.txt"; echo nope > "$S/denied.txt"; echo in > "$S/allowed/swap/inside.txt"
 echo TOP-SECRET > "$O/secret.txt"
+# The VMM must refuse allowlist entries that aren't real paths or that expose
+# the home directory, hidden directories or ~/Library.
+ln -s "$S/allowed" "$S/link"
+refused() { # refused <name> <allow path>
+  if "$BIN" --kernel "$HOME/.orbit/guest/kernel" --initrd /dev/null --mem 256 --cpus 1 --share "/Users:users" \
+       --share-allow "$2" >"$LOG.r" 2>&1 </dev/null; then echo "SEC FAIL host: accepted $1"
+  elif grep -qE 'real path|refusing' "$LOG.r"; then echo "SEC ok   host: refuses $1"
+  else echo "SEC FAIL host: $1 failed for another reason: $(tail -1 "$LOG.r")"; fi
+}
+refused "symlinked allow" "$S/link"
+refused "case-variant allow" "$(echo "$S/allowed" | tr '[:lower:]' '[:upper:]')"
+refused "home directory" "$HOME"
+refused "hidden directory" "$HOME/.orbit"
+rm -f "$S/link" "$LOG.r"
 "$BIN" --kernel "$HOME/.orbit/guest/kernel" --initrd "$HOME/.orbit/vmm/fssec.cpio.gz" --mem 768 --cpus 2 \
   --share "$S:t" --share-allow "$S/allowed" > "$LOG" 2>&1 &
 P=$!

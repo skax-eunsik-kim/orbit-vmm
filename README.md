@@ -55,8 +55,8 @@ memory, so freed memory can actually be returned.
 git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/src/orbit-vmm
 cd ~/src/orbit-vmm
 make guest      # download pinned Alpine kernel + rootfs (sha256-checked) into ~/.orbit/guest
-make build      # build and ad-hoc sign vmm/target/release/orbit-vmm
-make up         # install to ~/.orbit/bin and start the VM; first boot installs Docker (~1 min), later boots 2-4 s
+make install    # build, sign, and copy the VMM and scripts to ~/.orbit/bin
+make up         # start the VM from ~/.orbit/bin; first boot installs Docker (~1 min), later boots 2-4 s
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
 ```
@@ -68,11 +68,13 @@ docker context create orbit --docker host=unix://$HOME/.orbit/vmm/docker.sock
 docker context use orbit
 ```
 
-`make up` restarts a running VM, which stops all of its containers. It first
-copies the VMM and its scripts to `~/.orbit/bin` (`make install`), and the VM
-and the health check run from that copy. Containers can write to your shared
-directories, which usually include this checkout, so nothing runs from the
-checkout unless you rebuild it on purpose.
+`make up` (or `~/.orbit/bin/vmm-up.sh`) restarts a running VM, which stops all
+of its containers. The VM and the health check run only from the installed
+copy in `~/.orbit/bin`. Containers can write to your shared directories, and
+this checkout is often one of them, so `make up` builds and runs nothing from
+it. Only `make install` and `make guest` do. Before running those, check that
+the checkout hasn't changed unexpectedly (`git status`). Better still, keep the
+checkout outside your shared directories.
 
 ## Configuration
 
@@ -97,9 +99,10 @@ invisible. To add directories:
 ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
 ```
 
-Shared directories are **writable by every container**. Don't share your home
-directory itself (`vmm-up.sh` refuses), and keep secrets and tools that run
-automatically (shell profiles, `~/Library`, `~/.orbit`) outside them.
+Shared directories are **writable by every container**. orbit-vmm refuses to
+share your home directory, anything above it, hidden directories (`~/.ssh`,
+`~/.orbit`, …) and `~/Library`. Containers can't rename or remove the shared
+directories themselves.
 
 - Mac edits are visible in containers within about 0.5 s.
 - Mac edits and new files raise `IN_MODIFY` / `IN_CLOSE_WRITE` in containers
@@ -139,7 +142,7 @@ python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(
 ## Upgrading
 
 ```bash
-git pull && make guest build up
+git pull && make guest install up
 ```
 
 The first boot after a guest upgrade reinstalls guest packages (about 1 min).

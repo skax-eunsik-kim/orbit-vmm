@@ -27,20 +27,19 @@ if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then echo "previous VM $OLD stil
 if [ -z "${ORBIT_SHARE_ALLOW:-}" ]; then
   for d in work src code dev projects Developer; do [ -d "$HOME/$d" ] && ORBIT_SHARE_ALLOW="${ORBIT_SHARE_ALLOW:+$ORBIT_SHARE_ALLOW:}$HOME/$d"; done
 fi
-ALLOW=()
+# Passed to the VMM by their real paths (it rejects anything else, and refuses
+# to share your home directory, hidden directories or ~/Library: containers
+# can write to shared directories).
+ALLOW=(); REAL=()
 IFS=: read -ra dirs <<< "${ORBIT_SHARE_ALLOW:-}"
-for d in "${dirs[@]}"; do [ -n "$d" ] && ALLOW+=(--share-allow "$d"); done
-if [ ${#ALLOW[@]} -eq 0 ]; then echo "no shared directories (set ORBIT_SHARE_ALLOW)" >&2; exit 1; fi
-# Containers can write to shared directories. Sharing your home folder (or
-# anything containing ~/.orbit, ~/Library or your shell profile) would let any
-# container run code on the Mac, so refuse it.
 for d in "${dirs[@]}"; do
   [ -n "$d" ] || continue
-  r="$(cd "$d" 2>/dev/null && pwd -P)" || { echo "shared directory $d does not exist" >&2; exit 1; }
-  case "$(cd "$HOME" && pwd -P)/" in "${r%/}"/*) echo "refusing to share $d: it contains your home directory" >&2; exit 1 ;; esac
-  case "$VMM" in "$r"/*) echo "warning: running $VMM from inside shared $d; containers could replace it (use make install)" >&2 ;; esac
+  r="$(realpath "$d" 2>/dev/null)" && [ -d "$r" ] || { echo "shared directory $d does not exist" >&2; exit 1; }
+  ALLOW+=(--share-allow "$r"); REAL+=("$r")
+  case "$VMM" in "$r"/*) echo "warning: running $VMM from inside shared $r; containers could replace it (use make install)" >&2 ;; esac
 done
-printf '%s\n' "${dirs[@]}" | grep . > "$D/shares"
+if [ ${#ALLOW[@]} -eq 0 ]; then echo "no shared directories (set ORBIT_SHARE_ALLOW)" >&2; exit 1; fi
+printf '%s\n' "${REAL[@]}" > "$D/shares"
 
 NET_OPTS=()
 [ "${ORBIT_HOST_LOOPBACK:-1}" = 0 ] && NET_OPTS+=(--no-host-loopback)

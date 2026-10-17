@@ -24,4 +24,8 @@ echo "SEC ready-for-swap"; i=0; while [ ! -e /mnt/allowed/swapped ] && [ $i -lt 
 sleep 1
 check "no escape via swapped symlink" '! cat $A/swap/secret.txt 2>/dev/null'
 check "no write via swapped symlink"  '! sh -c "echo pwned > $A/swap/planted.txt" 2>/dev/null'
+# Allowed directories are like mount points: the guest can't move, remove or
+# replace them (else it could put a symlink there and get its target shared).
+check "allowed root can't be renamed" '! mv $A /mnt/allowed2 2>/dev/null && [ -d $A ]'
+check "allowed root can't be removed" '! rmdir $A 2>/dev/null && [ -d $A ]'
 umount /mnt; poweroff -f

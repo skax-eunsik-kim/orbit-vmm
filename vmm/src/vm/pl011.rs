@@ -2,7 +2,13 @@
 //! driver. Output goes to stdout; there is no input.
 
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+/// The guest controls what it prints; stop copying it to console.log past this
+/// much, so it can't fill the Mac's disk.
+const MAX_CONSOLE_BYTES: u64 = 256 << 20;
+static CONSOLE_BYTES: AtomicU64 = AtomicU64::new(0);
 
 use crate::devices::{IrqLine, MmioDevice};
 
@@ -81,10 +87,15 @@ impl MmioDevice for Pl011 {
         let mut regs = self.regs.lock().unwrap();
         match offset {
             DR => {
-                let mut out = std::io::stdout().lock();
-                let _ = out.write_all(&[value as u8]);
-                if value as u8 == b'\n' {
-                    let _ = out.flush();
+                let n = CONSOLE_BYTES.fetch_add(1, Ordering::Relaxed);
+                if n < MAX_CONSOLE_BYTES {
+                    let mut out = std::io::stdout().lock();
+                    let _ = out.write_all(&[value as u8]);
+                    if value as u8 == b'\n' {
+                        let _ = out.flush();
+                    }
+                } else if n == MAX_CONSOLE_BYTES {
+                    println!("\norbit-vmm: console output limit reached; further guest output dropped");
                 }
                 // The transmit FIFO drains instantly.
                 regs.ris |= INT_TX;
