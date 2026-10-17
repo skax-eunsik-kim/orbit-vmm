@@ -19,6 +19,10 @@ use std::sync::{Arc, Mutex};
 use super::{Queue, VirtioDevice, VirtioInterrupt, VIRTIO_F_VERSION_1};
 use crate::memory::GuestMemory;
 
+/// Control packets (RST, credit updates) queued for the guest beyond this are
+/// dropped; the guest isn't draining RX.
+const MAX_PENDING_CTRL: usize = 4096;
+
 pub const DEVICE_ID_VSOCK: u32 = 19;
 
 fn debug() -> bool {
@@ -154,7 +158,7 @@ impl Inner {
     }
 
     fn queue_ctrl(&mut self, key: Key, op: u16, flags: u32) {
-        if self.pending.len() > 4096 {
+        if self.pending.len() > MAX_PENDING_CTRL {
             return; // guest isn't draining RX; drop control replies rather than grow
         }
         if debug() {
@@ -245,8 +249,10 @@ impl Inner {
         }
         let key = (h.dst_port, h.src_port);
         let Some(conn) = self.conns.get_mut(&key) else {
-            if h.op != OP_RST {
-                // Unknown connection, or a guest-initiated connect: refuse.
+            if h.op != OP_RST && self.pending.len() <= MAX_PENDING_CTRL {
+                // Unknown connection, or a guest-initiated connect: refuse
+                // (bounded, like queue_ctrl: a guest that floods TX without
+                // posting RX buffers must not grow this queue forever).
                 let rst = Hdr {
                     src_cid: HOST_CID,
                     dst_cid: GUEST_CID,
@@ -387,7 +393,13 @@ impl Vsock {
             // never left missing, and make it owner-only (docker.sock = your account).
             let tmp = l.path.with_extension(format!("tmp-{}", std::process::id()));
             let _ = std::fs::remove_file(&tmp);
-            let sock = UnixListener::bind(&tmp).map_err(|e| format!("binding {}: {e}", tmp.display()))?;
+            // Created owner-only from the start (the chmod below alone leaves a
+            // window where the umask decides). Runs during setup, before any
+            // other thread creates files.
+            let old = unsafe { libc::umask(0o177) };
+            let bound = UnixListener::bind(&tmp);
+            unsafe { libc::umask(old) };
+            let sock = bound.map_err(|e| format!("binding {}: {e}", tmp.display()))?;
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, &l.path).map_err(|e| format!("installing {}: {e}", l.path.display()))?;

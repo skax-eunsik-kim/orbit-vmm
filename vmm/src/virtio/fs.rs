@@ -121,6 +121,7 @@ const EBADF: i32 = 9;
 const EEXIST: i32 = 17;
 const EINVAL: i32 = 22;
 const ENOSYS: i32 = 38;
+const EMFILE: i32 = 24;
 
 /// Attribute cache lifetime in ms (ORBIT_FS_ATTR_TTL_MS, default 500). File
 /// content changes made on the Mac are noticed when attributes are refreshed
@@ -436,6 +437,22 @@ impl Server {
         }
     }
 
+    /// Refuses new opens once the guest holds too many: each handle is a host
+    /// fd, and running out of fds would also break docker.sock and the network.
+    fn handle_room(&self) -> Result<(), i32> {
+        static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        let limit = *LIMIT.get_or_init(|| {
+            let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+            let cur = if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) } == 0 { rl.rlim_cur } else { 256 };
+            // Leave room for the VMM's own sockets, disk and listeners.
+            (cur.min(65536) as usize).saturating_sub(512).max(64)
+        });
+        if self.handles.lock().unwrap().len() >= limit {
+            return Err(EMFILE);
+        }
+        Ok(())
+    }
+
     fn add_handle(&self, h: Handle) -> u64 {
         let id = self.next_handle.fetch_add(1, Ordering::Relaxed);
         self.handles.lock().unwrap().insert(id, Arc::new(h));
@@ -734,6 +751,7 @@ impl Server {
         }
         let mode = create_mode.unwrap_or(0);
         let open = |flags: i32| self.root.open_file(path, flags & !libc::O_NOFOLLOW, mode);
+        self.handle_room()?;
         let f = match open(flags) {
             // A write-only file (e.g. mode 0200) can't be upgraded to read-write.
             Err(e) if e == libc::EACCES && darwin_open_flags(linux_flags) & libc::O_ACCMODE == libc::O_WRONLY => {
@@ -748,6 +766,7 @@ impl Server {
 
     fn opendir(&self, path: PathBuf) -> Result<u64, i32> {
         self.visible(&path)?;
+        self.handle_room()?;
         let fd = self.root.open_dir(&path)?;
         let self_ino = hostfs::fstat(&fd)?.ino;
         let mut entries =

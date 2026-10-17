@@ -1,4 +1,4 @@
-//! Device-facing interfaces shared by the core (agent A) and devices (agents B, C).
+//! Device-facing interfaces shared by the core and the devices.
 
 use std::sync::Arc;
 

@@ -53,9 +53,10 @@ impl Block {
             return (VIRTIO_BLK_S_IOERR, 0);
         }
         let kind: u32 = mem.read_obj(descs[0].addr).unwrap_or(u32::MAX);
-        let sector: u64 = mem.read_obj(descs[0].addr + 8).unwrap_or(0);
+        let sector: u64 = mem.read_obj(descs[0].addr.wrapping_add(8)).unwrap_or(0);
         let data = &descs[1..descs.len() - 1];
-        let mut offset = sector * SECTOR;
+        // Guest-controlled: an out-of-range sector fails in_range below.
+        let mut offset = sector.saturating_mul(SECTOR);
         let mut written = 0u32;
         let in_range = |off: u64, len: u64| off.checked_add(len).is_some_and(|end| end <= self.sectors * SECTOR);
         match kind {
@@ -72,7 +73,7 @@ impl Block {
                         return (VIRTIO_BLK_S_IOERR, written);
                     }
                     offset += d.len as u64;
-                    written += d.len;
+                    written = written.saturating_add(d.len);
                 }
                 (VIRTIO_BLK_S_OK, written)
             }
@@ -161,7 +162,7 @@ impl VirtioDevice for Block {
             if let Some(last) = chain.descs.last().filter(|d| d.write_only && d.len >= 1) {
                 mem.write_obj(last.addr, status);
             }
-            queue.add_used(&mem, chain.head, written + 1);
+            queue.add_used(&mem, chain.head, written.saturating_add(1));
             used = true;
         }
         self.queue = Some(queue);

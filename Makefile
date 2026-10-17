@@ -3,12 +3,13 @@ SHELL := /bin/bash
 DOCKER_SOCK := unix://$(HOME)/.orbit/vmm/docker.sock
 SH_FILES := $(shell git ls-files '*.sh' guest/init 'guest/etc/orbit/*' 'vmm/guest/init-*' | grep -v '\.py$$' | sort -u)
 
-.PHONY: help guest build up down test lint fmt devflow clean
+.PHONY: help guest build install up down test lint fmt devflow clean
 
 help:
 	@echo "make guest    download + build the guest kernel/initramfs (~/.orbit/guest)"
 	@echo "make build    build and sign vmm/target/release/orbit-vmm"
-	@echo "make up       (re)start the VM"
+	@echo "make install  copy the VMM and scripts to ~/.orbit/bin (outside shared dirs)"
+	@echo "make up       install, then (re)start the VM"
 	@echo "make down     shut the VM down"
 	@echo "make lint     cargo fmt --check, clippy -D warnings, shellcheck"
 	@echo "make test     cargo test"
@@ -20,8 +21,11 @@ guest:
 build:
 	$(MAKE) -C vmm build
 
-up:
-	./scripts/vmm-up.sh
+install: build
+	./scripts/install.sh
+
+up: install
+	$(HOME)/.orbit/bin/vmm-up.sh
 
 down:
 	@echo shutdown | nc -U -w 3 $(HOME)/.orbit/vmm/control.sock || true

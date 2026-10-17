@@ -23,7 +23,8 @@ make guest build up
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 ```
 
-Keep the checkout inside a shared directory (`~/src`, `~/work`, …; see
+`make up` runs `make install` first, so the VM runs from `~/.orbit/bin`, a
+copy of your build. Keep the checkout inside a shared directory (`~/src`, `~/work`, …; see
 `ORBIT_SHARE_ALLOW`), because the benchmark scripts bind-mount files from it.
 
 Repository layout:

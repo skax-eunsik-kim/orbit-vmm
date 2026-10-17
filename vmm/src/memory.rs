@@ -1,6 +1,5 @@
 //! Guest RAM: one contiguous region at `RAM_BASE` in guest physical space,
-//! backed by host anonymous memory from `hv_vm_allocate` (owner: core / agent A
-//! for allocation + mapping, agent C for `release`).
+//! backed by host anonymous memory mapped into the VM.
 
 /// Guest physical address where RAM starts (below it: MMIO devices).
 pub const RAM_BASE: u64 = 0x8000_0000;
@@ -71,7 +70,7 @@ impl GuestMemory {
     /// Give the host pages backing `[gpa, gpa+len)` back to macOS. The guest has
     /// promised not to rely on their contents; later guest accesses must still work
     /// (and see either old data or zeros). Only whole host pages inside the range
-    /// are released. Returns bytes released. Implemented by agent C.
+    /// are released. Returns bytes released.
     pub fn release(&self, gpa: u64, len: u64) -> u64 {
         crate::reclaim::release_range(self, gpa, len)
     }

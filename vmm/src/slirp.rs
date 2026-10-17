@@ -239,7 +239,7 @@ extern "C" fn cb_get_revents(idx: i32, opaque: *mut c_void) -> i32 {
 /// Runs libslirp on the current thread forever. `tx` carries guest → network
 /// frames (wake the loop by writing a byte to `wake_write`); `deliver` is
 /// called with network → guest frames.
-pub fn run(tx: Receiver<NetMsg>, wake_read: RawFd, forwards: Vec<Forward>, deliver: Deliver) {
+pub fn run(tx: Receiver<NetMsg>, wake_read: RawFd, forwards: Vec<Forward>, host_loopback: bool, deliver: Deliver) {
     let mut ctx = Box::new(Ctx { deliver, start: Instant::now(), timers: Vec::new(), pollfds: Vec::new() });
     let cfg = SlirpConfig {
         version: 4,
@@ -263,7 +263,7 @@ pub fn run(tx: Receiver<NetMsg>, wake_read: RawFd, forwards: Vec<Forward>, deliv
         vdomainname: std::ptr::null(),
         if_mtu: 1500,
         if_mru: 1500,
-        disable_host_loopback: false,
+        disable_host_loopback: !host_loopback,
         enable_emu: false,
         outbound_addr: std::ptr::null(),
         outbound_addr6: std::ptr::null(),

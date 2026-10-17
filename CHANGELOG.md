@@ -5,6 +5,28 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Run the VMM, `vmm-up.sh` and the health check from an installed copy in
+  `~/.orbit/bin` (`make install`), not from the checkout. Containers can
+  write to the checkout.
+- `vmm-up.sh` refuses to share the home directory or any directory above it.
+  It also creates `~/.orbit` with mode 0700, and sockets are created 0600
+  from the start.
+- The health check uses directory fds and `O_NOFOLLOW`, so a guest-planted
+  symlink can't redirect its writes.
+- The VMM bounds what the guest can make it hold:
+  - vsock control replies
+  - control-channel replies (64 KiB, 3 s)
+  - published ports (1024)
+  - open virtio-fs handles, with the fd limit raised at start
+- virtio-blk sector math saturates instead of overflowing.
+- `export-host-ca.py` exports only CA certificates trusted for TLS, so Wi-Fi,
+  S/MIME and leaf certificates are no longer exported.
+- New `ORBIT_HOST_LOOPBACK=0` (`--no-host-loopback`) cuts containers off
+  from the Mac's localhost.
+- CI actions are pinned to commit SHAs.
+
 ## [0.1.0] - 2026-10-17
 
 First public release.

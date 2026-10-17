@@ -8,12 +8,44 @@ use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::virtio::net::PortControl;
 
 /// Ports never published on the Mac (guest-internal services).
 const RESERVED: &[u16] = &[53];
+/// Upper bound on published ports, so a misbehaving guest can't make the VMM
+/// open tens of thousands of listeners.
+const MAX_PORTS: usize = 1024;
+/// Replies on the control channel are a few lines; anything bigger is junk.
+const MAX_REPLY: u64 = 64 << 10;
+
+/// One request/reply on the control socket, bounded in size and total time
+/// (the guest is untrusted: it must not be able to stall or bloat us).
+fn ask(path: &PathBuf, line: &str) -> Option<String> {
+    let mut s = UnixStream::connect(path).ok()?;
+    s.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
+    s.write_all(line.as_bytes()).ok()?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        let left = deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+        s.set_read_timeout(Some(left)).ok()?;
+        match s.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                out.extend_from_slice(&buf[..n]);
+                if out.len() as u64 > MAX_REPLY {
+                    return None;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return None,
+        }
+    }
+    String::from_utf8(out).ok()
+}
 
 pub fn spawn(control_socket: PathBuf, net: PortControl, fixed: Vec<u16>) {
     std::thread::Builder::new()
@@ -25,8 +57,11 @@ pub fn spawn(control_socket: PathBuf, net: PortControl, fixed: Vec<u16>) {
                 let Some(listening) = query(&control_socket) else {
                     continue;
                 };
-                let wanted: BTreeSet<u16> =
-                    listening.into_iter().filter(|p| !RESERVED.contains(p) && !fixed.contains(p)).collect();
+                let wanted: BTreeSet<u16> = listening
+                    .into_iter()
+                    .filter(|p| *p != 0 && !RESERVED.contains(p) && !fixed.contains(p))
+                    .take(MAX_PORTS)
+                    .collect();
                 for &p in wanted.difference(&active) {
                     net.set(p, true);
                 }
@@ -40,12 +75,7 @@ pub fn spawn(control_socket: PathBuf, net: PortControl, fixed: Vec<u16>) {
 }
 
 fn query(path: &PathBuf) -> Option<Vec<u16>> {
-    let mut s = UnixStream::connect(path).ok()?;
-    s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    s.write_all(b"ports\n").ok()?;
-    let mut out = String::new();
-    s.read_to_string(&mut out).ok()?;
-    Some(out.lines().filter_map(|l| l.trim().parse().ok()).collect())
+    Some(ask(path, "ports\n")?.lines().filter_map(|l| l.trim().parse().ok()).collect())
 }
 
 /// Keeps the guest clock on the Mac's. Every 5 s, ask the guest for its time
@@ -55,14 +85,6 @@ fn query(path: &PathBuf) -> Option<Vec<u16>> {
 /// If it is more than 250 ms off, set it on the next whole host second.
 /// This also catches up after the Mac sleeps (the guest's counter stops).
 pub fn spawn_time_sync(control_socket: PathBuf) {
-    fn ask(path: &PathBuf, line: &str) -> Option<String> {
-        let mut s = UnixStream::connect(path).ok()?;
-        s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-        s.write_all(line.as_bytes()).ok()?;
-        let mut reply = String::new();
-        s.read_to_string(&mut reply).ok()?;
-        Some(reply)
-    }
     fn now() -> f64 {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
     }

@@ -22,14 +22,45 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
+import secrets
 import time
 
 INTERVALS_H = [1, 2, 4]
 STREAK_TO_GROW = 3
-# Scratch directory for the bind-mount probe; must be inside a shared (allowed)
-# directory. Defaults to the checkout this script lives in.
-CHECK_DIR = os.environ.get("ORBIT_HEALTH_DIR") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".orbit-health")
+# The bind-mount probe needs a scratch directory inside a shared directory:
+# ORBIT_HEALTH_DIR's parent, or by default the first shared directory the VM
+# was started with (vmm-up.sh records them in <instance dir>/shares).
+SCRATCH = ".orbit-health"
+MAX_REPLY = 64 << 10
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def shared_parent(inst_dir):
+    if os.environ.get("ORBIT_HEALTH_DIR"):
+        return os.path.dirname(os.path.abspath(os.environ["ORBIT_HEALTH_DIR"]))
+    try:
+        with open(f"{inst_dir}/shares") as f:
+            return f.readline().strip() or None
+    except OSError:
+        return None
+
+
+# Containers can rename and symlink anything inside the scratch directory, so
+# every host-side access goes through a directory fd with O_NOFOLLOW: a planted
+# symlink makes the probe fail instead of writing outside the share.
+def write_at(dir_fd, name, data):
+    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=dir_fd)
+    with os.fdopen(fd, "w") as f:
+        f.write(data)
+
+
+def read_at(dir_fd, name):
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir_fd)
+    except OSError:
+        return ""
+    with os.fdopen(fd, "rb") as f:
+        return f.read(MAX_REPLY).decode(errors="replace")
 
 
 def sh(cmd, timeout=60, env=None):
@@ -46,7 +77,7 @@ def ask(sock_path, line, timeout=3):
     s.connect(sock_path)
     s.sendall(line.encode())
     out = b""
-    while True:
+    while len(out) <= MAX_REPLY:
         chunk = s.recv(4096)
         if not chunk:
             break
@@ -120,36 +151,59 @@ class Run:
             self.docker("rm", "-f", name)
 
     def bind_edit_and_inotify(self):
-        os.makedirs(CHECK_DIR, exist_ok=True)
-        work = tempfile.mkdtemp(dir=CHECK_DIR)
+        parent = shared_parent(self.dir)
+        if not parent:
+            return False, "no shared directory recorded; restart the VM with vmm-up.sh"
+        # The shared directory itself can't be replaced from the guest (its
+        # parent isn't shared), so it is a safe anchor.
+        pfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         try:
-            with open(f"{work}/f", "w") as f:
-                f.write("v1\n")
-            name = f"orbit-health-fs-{os.getpid()}"
-            rc, out = self.docker("run", "-d", "--rm", "--name", name, "--label", "orbit-health=1", "-v", f"{work}:/w",
-                                  "alpine:3.22", "sh", "-c",
-                                  "inotifyd - /w:w > /w/events 2>&1 & while true; do cat /w/f > /w/seen; sleep 0.1; done")
-            if rc != 0:
-                return False, out
             try:
-                time.sleep(2)
-                t0 = time.time()
-                with open(f"{work}/f", "w") as f:
-                    f.write("v2\n")
-                seen = event = None
-                while time.time() - t0 < 10 and (seen is None or event is None):
-                    if seen is None and "v2" in open(f"{work}/seen").read():
-                        seen = time.time() - t0
-                    if event is None and os.path.exists(f"{work}/events") and "\tf" in open(f"{work}/events").read():
-                        event = time.time() - t0
-                    time.sleep(0.05)
-                self.metrics["edit_visible_s"] = None if seen is None else round(seen, 2)
-                self.metrics["inotify_event_s"] = None if event is None else round(event, 2)
-                return seen is not None and event is not None, f"visible={seen} event={event}"
-            finally:
-                self.docker("rm", "-f", name)
+                os.mkdir(SCRATCH, 0o700, dir_fd=pfd)
+            except FileExistsError:
+                pass
+            hfd = os.open(SCRATCH, DIR_FLAGS, dir_fd=pfd)
         finally:
-            shutil.rmtree(work, ignore_errors=True)
+            os.close(pfd)
+        run = f"run-{os.getpid()}-{secrets.token_hex(4)}"
+        try:
+            os.mkdir(run, 0o700, dir_fd=hfd)
+            wfd = os.open(run, DIR_FLAGS, dir_fd=hfd)
+            try:
+                return self._probe(wfd, os.path.join(parent, SCRATCH, run))
+            finally:
+                os.close(wfd)
+        finally:
+            shutil.rmtree(run, dir_fd=hfd, ignore_errors=True)
+            os.close(hfd)
+
+    def _probe(self, wfd, work):
+        write_at(wfd, "f", "v1\n")
+        name = f"orbit-health-fs-{os.getpid()}"
+        rc, out = self.docker("run", "-d", "--rm", "--name", name, "--label", "orbit-health=1", "-v", f"{work}:/w",
+                              "alpine:3.22", "sh", "-c",
+                              "inotifyd - /w:w > /w/events 2>&1 & while true; do cat /w/f > /w/seen; sleep 0.1; done")
+        if rc != 0:
+            return False, out
+        try:
+            time.sleep(2)
+            t0 = time.time()
+            try:
+                write_at(wfd, "f", "v2\n")
+            except OSError as e:
+                return False, f"probe file replaced from the guest: {e}"
+            seen = event = None
+            while time.time() - t0 < 10 and (seen is None or event is None):
+                if seen is None and "v2" in read_at(wfd, "seen"):
+                    seen = time.time() - t0
+                if event is None and "\tf" in read_at(wfd, "events"):
+                    event = time.time() - t0
+                time.sleep(0.05)
+            self.metrics["edit_visible_s"] = None if seen is None else round(seen, 2)
+            self.metrics["inotify_event_s"] = None if event is None else round(event, 2)
+            return seen is not None and event is not None, f"visible={seen} event={event}"
+        finally:
+            self.docker("rm", "-f", name)
 
     def clock(self):
         t0 = time.time()
@@ -201,7 +255,7 @@ def console_errors(inst_dir, state):
         new = f.read().decode(errors="replace")
     state["console_offset"] = size
     bad = ("panic", "Kernel panic", "Oops", "BUG:", "Out of memory", "EXT4-fs error", "orbit-vmm: ", "segfault")
-    return [l.strip()[:160] for l in new.splitlines() if any(b in l for b in bad) and "clock was off" not in l][:20]
+    return [l.strip()[:160] for l in new.splitlines() if any(b in l for b in bad) and "clock was off" not in l and "Kernel command line" not in l][:20]
 
 
 def main():

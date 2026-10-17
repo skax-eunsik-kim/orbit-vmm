@@ -6,7 +6,9 @@
 set -eu
 LABEL=com.orbit.healthcheck
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Runs the installed copy (make install), never the checkout: the checkout is
+# usually in a shared directory that containers can write to.
+HC="$HOME/.orbit/bin/healthcheck.py"
 PY="$(command -v python3)"
 
 if [ "${1:-}" = --uninstall ]; then
@@ -16,6 +18,7 @@ if [ "${1:-}" = --uninstall ]; then
   exit 0
 fi
 
+[ -f "$HC" ] || { echo "run make install first" >&2; exit 1; }
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.orbit/vmm"
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -25,7 +28,7 @@ cat > "$PLIST" <<EOF
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$PY</string><string>-I</string><string>$ROOT/scripts/healthcheck.py</string>
+    <string>$PY</string><string>-I</string><string>$HC</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin</string></dict>

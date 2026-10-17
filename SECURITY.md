@@ -25,6 +25,26 @@ Out of scope: anything a container can already do through the Docker socket.
 That includes root in the guest, privileged containers, and access to the
 shared directories, which are writable by design.
 
+## Accepted risks
+
+These are deliberate trade-offs, documented so you can decide for yourself:
+
+- **Shared directories are writable from the guest.** A container can modify
+  anything in them, including source code and build scripts you later run on
+  the Mac. orbit-vmm itself runs from `~/.orbit/bin` (`make install`), not from
+  the checkout. `vmm-up.sh` refuses to share your home directory or anything
+  that contains it.
+- **Containers can reach the Mac's localhost services**
+  (`host.docker.internal`, like Docker Desktop). Turn this off with
+  `ORBIT_HOST_LOOPBACK=0`.
+- **Guest listeners appear on the Mac's 127.0.0.1.** A guest process can take
+  a free localhost port before a Mac service does.
+- **The guest can stop the VM.** A guest kernel fault or a malformed MMIO access
+  ends the VMM process, which is the same as the guest powering off.
+- **Containers trust the Mac's extra TLS roots.**
+  `scripts/export-host-ca.py` exports only CA certificates that are trusted
+  for TLS.
+
 ## Supported versions
 
 Only the latest `main` gets fixes.

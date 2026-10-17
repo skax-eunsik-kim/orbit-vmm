@@ -56,7 +56,7 @@ git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/src/orbit-vmm
 cd ~/src/orbit-vmm
 make guest      # download pinned Alpine kernel + rootfs (sha256-checked) into ~/.orbit/guest
 make build      # build and ad-hoc sign vmm/target/release/orbit-vmm
-make up         # start the VM; first boot installs Docker (~1 min), later boots take 2-4 s
+make up         # install to ~/.orbit/bin and start the VM; first boot installs Docker (~1 min), later boots 2-4 s
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
 ```
@@ -68,7 +68,11 @@ docker context create orbit --docker host=unix://$HOME/.orbit/vmm/docker.sock
 docker context use orbit
 ```
 
-`make up` restarts a running VM, which stops all of its containers.
+`make up` restarts a running VM, which stops all of its containers. It first
+copies the VMM and its scripts to `~/.orbit/bin` (`make install`), and the VM
+and the health check run from that copy. Containers can write to your shared
+directories, which usually include this checkout, so nothing runs from the
+checkout unless you rebuild it on purpose.
 
 ## Configuration
 
@@ -80,6 +84,7 @@ docker context use orbit
 | `ORBIT_CPUS` | `4` | vCPUs. |
 | `ORBIT_DISK_GB` | `64` | Size of a **new** data disk (sparse file). |
 | `ORBIT_SHARE_ALLOW` | see below | Colon-separated directories that containers may bind-mount. |
+| `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
 | `ORBIT_INSTANCE` | (unset) | Run a separate VM with its own disk and sockets under `~/.orbit/vmm-<name>`. |
 
 ### File sharing
@@ -92,6 +97,10 @@ invisible. To add directories:
 ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
 ```
 
+Shared directories are **writable by every container**. Don't share your home
+directory itself (`vmm-up.sh` refuses), and keep secrets and tools that run
+automatically (shell profiles, `~/Library`, `~/.orbit`) outside them.
+
 - Mac edits are visible in containers within about 0.5 s.
 - Mac edits and new files raise `IN_MODIFY` / `IN_CLOSE_WRITE` in containers
   about 1 s later.
@@ -102,6 +111,10 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
   Mac within about 1 s. If the Mac port is taken, the forward fails, and the
   error goes to `~/.orbit/vmm/console.log`.
 - Containers reach services on the Mac's localhost via `host.docker.internal`.
+  That includes anything listening only on `127.0.0.1` (databases, notebooks,
+  local model servers). Set `ORBIT_HOST_LOOPBACK=0` if you don't want that.
+- Any process listening on all addresses in the VM gets the same port on the
+  Mac's `127.0.0.1`, not only `-p` publishes (as with `--network host`).
 
 ## Files
 
@@ -133,7 +146,8 @@ The first boot after a guest upgrade reinstalls guest packages (about 1 min).
 
 ## Health check (optional)
 
-`scripts/install-healthcheck.sh` installs a launchd agent. It checks Docker,
+After `make install`, `scripts/install-healthcheck.sh` installs a launchd
+agent that runs the installed `~/.orbit/bin/healthcheck.py`. It checks Docker,
 ports, bind mounts, inotify and the guest clock, and records VMM memory, thread
 and fd counts to `~/.orbit/vmm/health.jsonl`.
 

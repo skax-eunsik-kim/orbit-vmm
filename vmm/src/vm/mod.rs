@@ -29,6 +29,7 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Config {
         disk: None,
         balloon: false,
         net: false,
+        host_loopback: true,
         forwards: Vec::new(),
         vsock: Vec::new(),
         shares: Vec::new(),
@@ -50,6 +51,7 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Config {
             "--disk" => config.disk = Some(value().into()),
             "--balloon" => config.balloon = true,
             "--net" => config.net = true,
+            "--no-host-loopback" => config.host_loopback = false,
             // Restrict every share to these directories (and the path down to them).
             "--share-allow" => config.share_allow.push(value().into()),
             "--share" => {

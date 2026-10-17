@@ -1,4 +1,4 @@
-//! virtio 1.x over MMIO. Transport + split virtqueue: agent B. Devices: B (blk), C (balloon).
+//! virtio 1.x over MMIO: transport, split virtqueue, and the devices.
 
 pub mod balloon;
 pub mod blk;

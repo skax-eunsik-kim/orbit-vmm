@@ -5,7 +5,9 @@ built-in Apple set: the ones an admin or the user marked "Always Trust"
 reach the internet through such a proxy.
 
 Certificates that are merely present in a keychain (intermediates, device or
-802.1X certificates, ones set to "Never Trust") are left out.
+802.1X certificates, ones set to "Never Trust"), ones trusted only for other
+purposes (Wi-Fi/EAP, S/MIME, code signing), and anything that isn't a CA
+certificate are left out.
 """
 import os
 import plistlib
@@ -15,6 +17,8 @@ import sys
 import tempfile
 
 TRUST_ROOT, TRUST_AS_ROOT, DENY = 1, 2, 3
+# DER body of the SSL policy OID (1.2.840.113635.100.1.3).
+SSL_POLICY_OID = bytes.fromhex("2a864886f763640103")
 KEYCHAINS = [
     "/Library/Keychains/System.keychain",
     os.path.expanduser("~/Library/Keychains/login.keychain-db"),
@@ -35,7 +39,9 @@ def trusted_sha1s():
             os.remove(out)
             for sha1, entry in trust_list.items():
                 settings = entry.get("trustSettings", [])
-                results = {s.get("kSecTrustSettingsResult", TRUST_ROOT) for s in settings}
+                # Only settings that apply to TLS: no policy (= every policy) or the SSL policy.
+                tls = [s for s in settings if s.get("kSecTrustSettingsPolicy", SSL_POLICY_OID) == SSL_POLICY_OID]
+                results = {s.get("kSecTrustSettingsResult", TRUST_ROOT) for s in tls}
                 if DENY in results:
                     denied.add(sha1.upper())
                 # An empty settings array means "trust as root for everything".
@@ -59,10 +65,15 @@ def certs_by_sha1():
     return found
 
 
+def is_ca(pem):
+    r = subprocess.run(["openssl", "x509", "-noout", "-text"], input=pem, capture_output=True, text=True)
+    return r.returncode == 0 and re.search(r"Basic Constraints:.*\n\s*CA:TRUE", r.stdout) is not None
+
+
 def main():
     trusted = trusted_sha1s()
     certs = certs_by_sha1()
-    picked = [certs[s] for s in sorted(trusted) if s in certs]
+    picked = [certs[s] for s in sorted(trusted) if s in certs and is_ca(certs[s])]
     sys.stdout.write("".join(picked))
     print(f"exported {len(picked)} trusted root(s) of {len(certs)} keychain certificate(s)", file=sys.stderr)
 

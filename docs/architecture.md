@@ -29,7 +29,7 @@ file per device.
 
 ### Returning memory
 
-Guest RAM is anonymous `mmap` memory mapped into the VM. When the guest
+Guest RAM is anonymous memory from `hv_vm_allocate`, mapped into the VM. When the guest
 reports free pages (`VIRTIO_BALLOON_F_REPORTING`, queue 2), the VMM:
 
 1. unmaps the range from the VM (`hv_vm_unmap`),

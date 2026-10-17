@@ -82,7 +82,7 @@ pub struct Net {
 
 impl Net {
     /// Starts the slirp network thread and returns the device.
-    pub fn new(forwards: Vec<Forward>) -> Self {
+    pub fn new(forwards: Vec<Forward>, host_loopback: bool) -> Self {
         let rx = Arc::new(Mutex::new(Rx::default()));
         let (to_slirp, from_guest) = channel::<NetMsg>();
         let mut fds = [0; 2];
@@ -101,7 +101,7 @@ impl Net {
                     }
                     rx.flush();
                 });
-                slirp::run(from_guest, fds[0], forwards, deliver);
+                slirp::run(from_guest, fds[0], forwards, host_loopback, deliver);
             })
             .expect("spawn net thread");
         Self {

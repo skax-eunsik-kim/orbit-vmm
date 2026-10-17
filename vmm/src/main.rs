@@ -5,14 +5,14 @@ mod ports;
 mod reclaim;
 mod slirp;
 mod virtio;
-mod vm; // agent A: hvf bindings, GIC, vCPU loop, PSCI, FDT, PL011, boot
+mod vm; // hvf bindings, GIC, vCPU loop, PSCI, FDT, PL011, boot
 
 use std::path::PathBuf;
 
-/// Command line contract (agent A implements parsing details, keep these flags):
+/// Command line:
 ///   orbit-vmm --kernel <Image> [--initrd <cpio.gz>] [--mem <MiB>] [--cpus <n>]
 ///             [--cmdline "<kernel args>"] [--disk <raw.img>] [--balloon]
-///             [--net] [--fwd tcp:<host port>:<guest port>]...
+///             [--net] [--no-host-loopback] [--fwd tcp:<host port>:<guest port>]...
 ///             [--vsock <unix socket path>:<guest port>]...
 ///             [--share <host dir>:<virtiofs tag>]... [--share-allow <dir>]...
 pub struct Config {
@@ -24,6 +24,8 @@ pub struct Config {
     pub disk: Option<PathBuf>,
     pub balloon: bool,
     pub net: bool,
+    /// Let the guest reach the Mac's 127.0.0.1 through the gateway (host.docker.internal).
+    pub host_loopback: bool,
     pub forwards: Vec<slirp::Forward>,
     pub vsock: Vec<virtio::vsock::VsockListen>,
     pub shares: Vec<virtio::fs::Share>,
@@ -46,7 +48,7 @@ fn virtio_devices(config: &Config, mem: &std::sync::Arc<memory::GuestMemory>) ->
         }
     }
     if config.net {
-        let net = virtio::net::Net::new(config.forwards.clone());
+        let net = virtio::net::Net::new(config.forwards.clone(), config.host_loopback);
         // Auto-publish guest ports when the guest control channel is available.
         if let Some(ctl) = config.vsock.iter().find(|v| v.guest_port == 1025) {
             let fixed = config.forwards.iter().map(|f| f.host_port).collect();
@@ -81,10 +83,21 @@ fn virtio_devices(config: &Config, mem: &std::sync::Arc<memory::GuestMemory>) ->
     devices
 }
 
+/// macOS starts processes with a soft limit of 256 fds; every file the guest
+/// holds open on a share is one host fd. Raise it to the hard limit (capped).
+fn raise_fd_limit() {
+    let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) } == 0 {
+        rl.rlim_cur = rl.rlim_max.min(65536);
+        unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &rl) };
+    }
+}
+
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--reclaim-selftest") {
         std::process::exit(reclaim::selftest());
     }
+    raise_fd_limit();
     let config = vm::parse_args(std::env::args().skip(1));
     std::process::exit(vm::run(config));
 }
