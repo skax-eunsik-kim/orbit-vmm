@@ -1,0 +1,51 @@
+name: Bug report
+description: Something doesn't work or behaves differently from Docker Desktop / OrbStack.
+labels: [bug]
+body:
+  - type: checkboxes
+    id: prereqs
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I checked "Known limitations" in the README.
+          required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, a minimal compose.yml or Dockerfile if possible.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Relevant lines from ~/.orbit/vmm/console.log
+      description: Please remove anything private (hostnames, paths, tokens).
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: orbit-vmm commit (`git rev-parse --short HEAD`)
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model and macOS version
+      placeholder: MacBook Pro M3, macOS 26.1
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Non-default settings
+      description: ORBIT_MEM_MIB, ORBIT_CPUS, ORBIT_SHARE_ALLOW, VPN or network filters, etc.

@@ -1,0 +1,16 @@
+#!/bin/sh
+# virtio-vsock test: echo server on guest port 5000 (socat, installed via apk).
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc; mount -t sysfs sysfs /sys; mount -t devtmpfs devtmpfs /dev; mount -t tmpfs tmpfs /tmp
+tar xzf /linux-virt.apk -C / lib/modules 2>/dev/null
+for m in virtio_mmio virtio_net vmw_vsock_virtio_transport; do modprobe $m; done
+ip link set lo up; ip link set eth0 up
+ip addr add 10.0.2.15/24 dev eth0; ip route add default via 10.0.2.2
+echo "nameserver 10.0.2.3" > /etc/resolv.conf
+date -s "@$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^orbit.time=//p')" >/dev/null 2>&1
+apk add -q socat >/dev/null 2>&1 || echo "VSOCKTEST apk failed"
+socat VSOCK-LISTEN:5000,fork,reuseaddr EXEC:cat &
+sleep 1
+echo "VSOCKTEST ready"
+sleep 120
+poweroff -f

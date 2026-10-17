@@ -1,0 +1,35 @@
+#!/bin/sh
+# Free page reporting test: idle, allocate 600 MiB anonymous memory, free it,
+# idle again, power off. The host samples the VMM's footprint meanwhile.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+tar xzf /linux-virt.apk -C / lib/modules 2>/dev/null
+modprobe virtio_mmio
+modprobe virtio_balloon
+t() { cut -d' ' -f1 /proc/uptime; }
+say() { echo "MEMTEST t=$(t) $*"; }
+for d in /sys/bus/virtio/devices/*; do
+  [ -e "$d" ] && say "virtio $(basename $d) device=$(cat $d/device) features=$(cat $d/features) driver=$(basename $(readlink $d/driver) 2>/dev/null)"
+done
+say "phase=idle $(grep -E 'MemFree' /proc/meminfo | tr -s ' ')"
+sleep 15
+say "phase=alloc start"
+# tail buffers the whole newline-free stream: 600 MiB of anonymous memory.
+head -c 600m /dev/zero | tail > /dev/null &
+sleep 12
+say "phase=alloc holding $(grep -E 'MemFree' /proc/meminfo | tr -s ' ')"
+wait
+say "phase=freed $(grep -E 'MemFree' /proc/meminfo | tr -s ' ')"
+sleep 30
+say "phase=done $(grep -E 'MemFree' /proc/meminfo | tr -s ' ')"
+# Integrity: reuse the reported (host-released) pages for real data and make
+# sure it survives another free/report cycle.
+dd if=/dev/urandom of=/tmp/a bs=1M count=300 2>/dev/null
+sum1=$(md5sum /tmp/a | cut -d' ' -f1)
+head -c 300m /dev/zero | tail > /dev/null
+sleep 8
+sum2=$(md5sum /tmp/a | cut -d' ' -f1)
+[ "$sum1" = "$sum2" ] && say "integrity=ok" || say "integrity=CORRUPT $sum1 $sum2"
+poweroff -f

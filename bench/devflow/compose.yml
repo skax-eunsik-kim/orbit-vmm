@@ -1,0 +1,32 @@
+# A typical app's infra services, on test-only host ports and volume names so
+# it can run next to a real stack without touching it.
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports: ["15444:5432"]
+    environment: [POSTGRES_USER=postgres, POSTGRES_PASSWORD=postgres, POSTGRES_DB=app]
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+  redis:
+    image: redis:7-alpine
+    ports: ["16379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      retries: 60
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    ports: ["20000:10000"]
+    command: "azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 -l /data --skipApiVersionCheck"
+    volumes: [azurite:/data]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "10000"]
+      interval: 1s
+      retries: 60
+volumes:
+  pg:
+  azurite:

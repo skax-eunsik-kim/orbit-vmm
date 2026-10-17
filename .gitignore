@@ -1,0 +1,12 @@
+.build/
+vmm/target/
+bench/tmp-*/
+vmm/target-next/
+bench/devflow/tmp*/
+vmm/bench/*-share/
+vmm/bench/memtrace-results.txt
+.orbit-health/
+bench/tmp-multi/
+bench/results.txt
+bench/mem-results.txt
+bench/devflow/results-*.txt

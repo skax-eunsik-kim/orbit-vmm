@@ -1,0 +1,40 @@
+#!/bin/sh
+# OCI runtime wrapper around runc (Docker's default runtime in the guest, and
+# the `runc` BuildKit finds on PATH). On `create`/`run`, makes the container trust the Mac's root certificates, like
+# the host does: corporate TLS inspection otherwise breaks apk/pip/npm/curl
+# and API calls from containers. The image's own CA bundle is kept and the
+# host roots are appended to a per-container copy bind-mounted over it (same mode).
+# Node.js ignores the system store, so NODE_EXTRA_CA_CERTS points at the merged bundle.
+HOST_CA=/etc/orbit/host-ca.pem
+bundle=""; is_create=0; prev=""
+for a in "$@"; do
+  # `create` from containerd shims, `run` from BuildKit's executor.
+  { [ "$a" = create ] || [ "$a" = run ]; } && is_create=1
+  [ "$prev" = --bundle ] || [ "$prev" = -b ] && bundle=$a
+  prev=$a
+done
+if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -s $HOST_CA ] && command -v jq >/dev/null; then
+  root=$(jq -r '.root.path' "$bundle/config.json")
+  case "$root" in /*) ;; *) root="$bundle/$root" ;; esac
+  # Only bind over CA bundles the image already has: nothing new is created in
+  # its root filesystem, so no trace of the host CA ends up in an image that
+  # BuildKit commits from a RUN step (the bind mount itself is never captured).
+  mounts='[]'; first=""
+  for path in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do
+    [ -f "$root$path" ] && [ ! -L "$root$path" ] || continue
+    copy="$bundle/orbit-ca-$(echo "$path" | tr / _)"
+    cat "$root$path" $HOST_CA > "$copy"
+    chmod "$(stat -c %a "$root$path")" "$copy"
+    mounts=$(echo "$mounts" | jq --arg s "$copy" --arg d "$path" '. + [{destination: $d, type: "bind", source: $s, options: ["rbind", "ro"]}]')
+    [ -n "$first" ] || first=$path
+  done
+  if [ -n "$first" ]; then
+    # Node.js ignores the system store; point it at the merged bundle.
+    jq --argjson m "$mounts" --arg ca "$first" '
+      .mounts += $m
+      | if ([.process.env[]? | startswith("NODE_EXTRA_CA_CERTS=")] | any) then .
+        else .process.env += ["NODE_EXTRA_CA_CERTS=" + $ca] end' \
+      "$bundle/config.json" > "$bundle/config.json.orbit" && mv "$bundle/config.json.orbit" "$bundle/config.json"
+  fi
+fi
+exec /usr/bin/runc "$@"

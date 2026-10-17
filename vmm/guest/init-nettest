@@ -1,0 +1,31 @@
+#!/bin/sh
+# virtio-net + slirp test: DHCP, DNS, HTTPS through apk, download throughput.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t tmpfs tmpfs /tmp
+tar xzf /linux-virt.apk -C / lib/modules 2>/dev/null
+modprobe virtio_mmio
+modprobe virtio_net
+ip link set lo up
+ip link set eth0 up
+cat > /tmp/dhcp.sh <<'EOF'
+#!/bin/sh
+[ "$1" = bound ] || exit 0
+ip addr add "$ip/${mask:-24}" dev "$interface"
+ip route add default via "$router"
+echo "nameserver $dns" > /etc/resolv.conf
+EOF
+chmod +x /tmp/dhcp.sh
+udhcpc -i eth0 -q -t 5 -s /tmp/dhcp.sh >/dev/null 2>&1
+echo "NETTEST addr=$(ip -4 -o addr show eth0 | awk '{print $4}') gw=$(ip route | awk '/default/{print $3}') dns=$(awk '{print $2}' /etc/resolv.conf)"
+echo "NETTEST resolve=$(timeout 8 nslookup dl-cdn.alpinelinux.org 10.0.2.3 2>&1 | tail -2 | tr '\n' ' ')"
+echo "NETTEST tcp-host=$(timeout 5 wget -q -O- http://10.0.2.2:18099/ 2>&1 | head -c 60)"
+echo "NETTEST tcp-ip=$(timeout 8 wget -q -S -O /dev/null http://151.101.2.132/ 2>&1 | head -1)"
+date -s "@$(cat /proc/cmdline | tr ' ' '\n' | sed -n 's/^orbit.time=//p')" >/dev/null 2>&1
+apk update -q >/dev/null 2>&1 && echo "NETTEST https=ok" || echo "NETTEST https=FAIL"
+apk add -q curl >/dev/null 2>&1
+curl -s -o /dev/null -w "NETTEST download=%{size_download}B speed=%{speed_download}B/s time=%{time_total}s\n" \
+  https://dl-cdn.alpinelinux.org/alpine/latest-stable/main/aarch64/APKINDEX.tar.gz
+poweroff -f

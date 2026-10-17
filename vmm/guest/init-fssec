@@ -1,0 +1,27 @@
+#!/bin/sh
+# virtio-fs security/permission checks. Host prepares (see bench/fssec.sh):
+#   share/allowed/      allowed directory (--share-allow), with file.txt
+#   share/denied.txt    outside the allowlist
+#   share/allowed/swap/ directory the host replaces with a symlink to /tmp/orbit-outside
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc; mount -t sysfs sysfs /sys; mount -t devtmpfs devtmpfs /dev
+tar xzf /linux-virt.apk -C / lib/modules 2>/dev/null
+modprobe virtio_mmio; modprobe virtiofs
+mkdir -p /mnt; mount -t virtiofs t /mnt || { echo "SEC FAIL mount"; poweroff -f; }
+ok() { echo "SEC ok   $*"; }; bad() { echo "SEC FAIL $*"; }
+check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+A=/mnt/allowed
+check "allowed file readable"        '[ "$(cat $A/file.txt)" = hello ]'
+check "denied file invisible"        '! cat /mnt/denied.txt 2>/dev/null'
+check "root lists only way down"     '[ "$(ls /mnt)" = allowed ]'
+check "root not writable"            '! touch /mnt/new 2>/dev/null'
+check "allowed dir writable"         'echo w > $A/w.txt && [ "$(cat $A/w.txt)" = w ]'
+adduser -D -u 1000 dev 2>&1 | head -2; id dev; ls -ln $A | head -3; su dev -s /bin/sh -c "id; echo x >> $A/file.txt" 2>&1 | sed 's/^/SEC dbg /'
+check "non-root can write host file" 'adduser -D -u 1000 dev 2>/dev/null; su dev -s /bin/sh -c "echo x >> $A/file.txt" && grep -q x $A/file.txt'
+check "non-root can create in dir"   'su dev -s /bin/sh -c "echo y > $A/by-dev.txt" && [ "$(stat -c %u $A/by-dev.txt)" = 1000 ]'
+ls $A/swap >/dev/null 2>&1; cat $A/swap/inside.txt >/dev/null 2>&1   # guest caches the real directory
+echo "SEC ready-for-swap"; i=0; while [ ! -e /mnt/allowed/swapped ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+sleep 1
+check "no escape via swapped symlink" '! cat $A/swap/secret.txt 2>/dev/null'
+check "no write via swapped symlink"  '! sh -c "echo pwned > $A/swap/planted.txt" 2>/dev/null'
+umount /mnt; poweroff -f

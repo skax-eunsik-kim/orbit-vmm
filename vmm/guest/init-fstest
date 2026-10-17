@@ -1,0 +1,40 @@
+#!/bin/sh
+# virtio-fs test against a host directory shared with tag "t".
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc; mount -t sysfs sysfs /sys; mount -t devtmpfs devtmpfs /dev; mount -t tmpfs tmpfs /tmp
+tar xzf /linux-virt.apk -C / lib/modules 2>/dev/null
+modprobe virtio_mmio; modprobe virtiofs
+mkdir -p /mnt
+ok() { echo "FSTEST ok   $*"; }
+bad() { echo "FSTEST FAIL $*"; }
+check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+mount -t virtiofs t /mnt || { bad mount; poweroff -f; }
+ok mount
+cd /mnt || exit 1
+check "read host file" '[ "$(cat from-host.txt)" = "hello from macOS" ]'
+check "write"          'echo "hello from linux" > from-guest.txt && [ "$(cat from-guest.txt)" = "hello from linux" ]'
+check "append"         'echo more >> from-guest.txt && [ "$(wc -l < from-guest.txt)" -eq 2 ]'
+check "mkdir -p"       'mkdir -p a/b/c && [ -d a/b/c ]'
+echo x > old; mv old a/b/new; echo "FSTEST dbg mv=$? old_exists=$([ -e old ] && echo yes || echo no) new=$(cat a/b/new 2>&1)"
+check "rename file"    '[ ! -e old ] && [ "$(cat a/b/new)" = x ]'
+check "rename dir"     'mv a/b a/renamed && [ -f a/renamed/new ] && [ -d a/renamed/c ]'
+check "symlink"        'ln -s a/renamed/new link && [ "$(cat link)" = x ] && [ "$(readlink link)" = a/renamed/new ]'
+check "hardlink"       'ln a/renamed/new hard && [ "$(stat -c %h hard)" -eq 2 ]'
+check "chmod"          'touch exe && chmod 751 exe && [ "$(stat -c %a exe)" = 751 ]'
+check "truncate"       'head -c 1000 /dev/zero > tr && truncate -s 10 tr && [ "$(stat -c %s tr)" -eq 10 ]'
+check "unlink/rmdir"   'rm hard && rmdir a/renamed/c && [ ! -e a/renamed/c ]'
+check "rm -rf"         'mkdir -p gone/x/y && touch gone/x/y/z && rm -rf gone && [ ! -e gone ]'
+dd if=/dev/urandom of=/tmp/big bs=1M count=64 2>/dev/null
+check "64MiB copy"     'cp /tmp/big big.bin && [ "$(md5sum < big.bin)" = "$(md5sum < /tmp/big)" ]'
+md5sum < /tmp/big | cut -d' ' -f1 > big.md5
+mkdir many
+t0=$(cut -d' ' -f1 /proc/uptime)
+i=0; while [ $i -lt 5000 ]; do echo $i > many/f$i; i=$((i+1)); done
+t1=$(cut -d' ' -f1 /proc/uptime)
+check "5000 files listed" '[ "$(ls many | wc -l)" -eq 5000 ]'
+cat many/* > /dev/null
+t2=$(cut -d' ' -f1 /proc/uptime)
+echo "FSTEST timing create5000=${t0}->${t1} read5000=${t1}->${t2}"
+check "statfs"         'df /mnt | tail -1 | grep -q mnt'
+cd /; umount /mnt && ok umount || bad umount
+poweroff -f

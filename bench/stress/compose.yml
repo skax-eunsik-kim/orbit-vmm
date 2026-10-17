@@ -1,0 +1,19 @@
+# One "worktree" stack: typical infra (postgres, redis) plus a watcher that bind-mounts the
+# worktree and records what it sees (content + inotify events).
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports: ["${PG_PORT}:5432"]
+    environment: [POSTGRES_PASSWORD=postgres, POSTGRES_DB=app]
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U postgres -d app"], interval: 1s, retries: 90}
+  redis:
+    image: redis:7-alpine
+    ports: ["${REDIS_PORT}:6379"]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 1s, retries: 90}
+  watcher:
+    image: alpine:3.22
+    volumes: ["${WT}:/src"]
+    command: ["sh", "-c", "inotifyd - /src:wcn > /src/.events 2>&1 & while true; do cat /src/app.py > /src/.seen 2>/dev/null; sleep 0.2; done"]
+volumes:
+  pg:

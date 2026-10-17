@@ -1,0 +1,6 @@
+# Guest scripts run under busybox ash, which supports `set -o pipefail`.
+# Word splitting of $(...) is used on purpose (`set -- $(cpu)`), and loop
+# counters are often unused.
+disable=SC2034,SC2046,SC2155,SC2207,SC3040
+# udhcpc passes $interface, $ip, $router in the environment.
+disable=SC2154

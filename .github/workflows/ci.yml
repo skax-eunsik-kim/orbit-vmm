@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vmm:
+    # Apple Silicon runner. Hypervisor.framework can't boot guests here (no
+    # nested virtualisation), so this builds, lints and unit-tests only.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install libslirp shellcheck
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal -c rustfmt,clippy && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: vmm
+      - name: Lint
+        run: make lint
+      - name: Test
+        run: make test
+      - name: Release build
+        run: make build

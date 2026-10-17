@@ -1,0 +1,19 @@
+[package]
+name = "orbit-vmm"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/skax-eunsik-kim/orbit-vmm"
+rust-version = "1.87"
+description = "Minimal arm64 VMM on Hypervisor.framework with virtio-balloon free page reporting"
+
+[[bin]]
+name = "orbit-vmm"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+vm-fdt = "0.3"
+
+[profile.release]
+debug = 1

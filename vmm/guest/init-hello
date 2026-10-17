@@ -1,0 +1,10 @@
+#!/bin/sh
+# Boot smoke test: prove we reached userspace, then power off via PSCI.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+echo "ORBIT-VMM: userspace up: $(uname -r), cpus=$(grep -c ^processor /proc/cpuinfo)"
+echo "ORBIT-VMM: uptime $(cut -d' ' -f1 /proc/uptime)s, $(grep MemTotal /proc/meminfo)"
+sleep 1
+echo "ORBIT-VMM: timer ok, uptime $(cut -d' ' -f1 /proc/uptime)s"
+poweroff -f

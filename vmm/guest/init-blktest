@@ -1,0 +1,18 @@
+#!/bin/sh
+# virtio-blk test: write 64 MiB of random data to /dev/vda, flush, read it back.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+tar xzf /linux-virt.apk -C / lib/modules 2>/dev/null
+modprobe virtio_mmio
+modprobe virtio_blk
+sleep 1
+echo "BLKTEST size_sectors=$(cat /sys/block/vda/size 2>/dev/null || echo missing)"
+dd if=/dev/urandom of=/tmp/pattern bs=1M count=64 2>/dev/null
+w=$(md5sum /tmp/pattern | cut -d' ' -f1)
+dd if=/tmp/pattern of=/dev/vda bs=1M conv=fsync 2>/dev/null
+echo 3 > /proc/sys/vm/drop_caches
+r=$(dd if=/dev/vda bs=1M count=64 2>/dev/null | md5sum | cut -d' ' -f1)
+echo "BLKTEST written=$w readback=$r"
+poweroff -f

@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Prints, as PEM, the certificates this Mac trusts as TLS roots beyond the
+built-in Apple set: the ones an admin or the user marked "Always Trust"
+(typically a corporate TLS-inspection CA). These are what containers need to
+reach the internet through such a proxy.
+
+Certificates that are merely present in a keychain (intermediates, device or
+802.1X certificates, ones set to "Never Trust") are left out.
+"""
+import os
+import plistlib
+import re
+import subprocess
+import sys
+import tempfile
+
+TRUST_ROOT, TRUST_AS_ROOT, DENY = 1, 2, 3
+KEYCHAINS = [
+    "/Library/Keychains/System.keychain",
+    os.path.expanduser("~/Library/Keychains/login.keychain-db"),
+]
+
+
+def trusted_sha1s():
+    """SHA-1s with root trust in the admin or user trust-settings domain."""
+    trusted, denied = set(), set()
+    with tempfile.TemporaryDirectory() as tmp:
+        for args in (["-d"], []):  # admin domain, user domain
+            out = os.path.join(tmp, "settings.plist")
+            r = subprocess.run(["security", "trust-settings-export", *args, out], capture_output=True)
+            if r.returncode != 0 or not os.path.exists(out):
+                continue
+            with open(out, "rb") as f:
+                trust_list = plistlib.load(f).get("trustList", {})
+            os.remove(out)
+            for sha1, entry in trust_list.items():
+                settings = entry.get("trustSettings", [])
+                results = {s.get("kSecTrustSettingsResult", TRUST_ROOT) for s in settings}
+                if DENY in results:
+                    denied.add(sha1.upper())
+                # An empty settings array means "trust as root for everything".
+                elif not settings or results & {TRUST_ROOT, TRUST_AS_ROOT}:
+                    trusted.add(sha1.upper())
+    return trusted - denied
+
+
+def certs_by_sha1():
+    found = {}
+    for kc in KEYCHAINS:
+        if not os.path.exists(kc):
+            continue
+        r = subprocess.run(["security", "find-certificate", "-a", "-Z", "-p", kc], capture_output=True, text=True)
+        for sha1, pem in re.findall(
+            r"SHA-1 hash: ([0-9A-F]+)\n(?:.*\n)*?(-----BEGIN CERTIFICATE-----\n.*?-----END CERTIFICATE-----\n)",
+            r.stdout,
+            re.S,
+        ):
+            found.setdefault(sha1.upper(), pem)
+    return found
+
+
+def main():
+    trusted = trusted_sha1s()
+    certs = certs_by_sha1()
+    picked = [certs[s] for s in sorted(trusted) if s in certs]
+    sys.stdout.write("".join(picked))
+    print(f"exported {len(picked)} trusted root(s) of {len(certs)} keychain certificate(s)", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

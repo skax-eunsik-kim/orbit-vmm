@@ -1,0 +1,68 @@
+#!/bin/sh
+# Hands memory back to the Mac. Free page reporting (virtio-balloon) returns
+# *free* guest pages, but Linux keeps freed file data as page cache and leaves
+# free memory fragmented, so after builds or with a stack running the VM stays
+# much bigger on the Mac than what the guest actually uses.
+#
+#  - quiet (CPU >= 85% idle, light disk I/O) for QUIET_S: reclaim half of the
+#    containers' page cache (cgroup memory.reclaim, gentle on running services)
+#    and compact, so freed pages form blocks that get reported;
+#  - idle (CPU >= 95% idle) for IDLE_S: drop all clean page cache and the
+#    dentry/inode caches (a build leaves ~1 GB of them; on virtio-fs dropping
+#    them also lets the host forget its nodes), compact.
+#
+# Tunables (kernel command line): orbit.memd_idle=<s> (30), orbit.memd_quiet=<s>
+# (60), orbit.memd_min_mb=<MiB> (128: leave caches smaller than this alone).
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+IDLE_S=30; QUIET_S=60; MIN_MB=128
+for arg in $(cat /proc/cmdline); do
+  case "$arg" in
+    orbit.memd_idle=*) IDLE_S=${arg#orbit.memd_idle=} ;;
+    orbit.memd_quiet=*) QUIET_S=${arg#orbit.memd_quiet=} ;;
+    orbit.memd_min_mb=*) MIN_MB=${arg#orbit.memd_min_mb=} ;;
+  esac
+done
+INTERVAL=5
+# Defragment in the background too, so free memory stays reportable.
+sysctl -qw vm.compaction_proactiveness=50 2>/dev/null
+
+cpu() { awk '/^cpu /{print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6}' /proc/stat; }
+io() { awk '/^(pgpgin|pgpgout) /{s+=$2} END{print s}' /proc/vmstat; }
+# Reclaimable page cache: tmpfs shows up as Cached too but can't be dropped.
+cached_mb() { awk '/^Cached:/{c=$2} /^Shmem:/{s=$2} END{print int((c-s)/1024)}' /proc/meminfo; }
+log() { echo "[memd] $*" > /dev/hvc0; }
+
+set -- $(cpu); last_total=$1; last_idle=$2
+last_io=$(io)
+idle_for=0; quiet_for=0; trimmed=0
+while sleep $INTERVAL; do
+  set -- $(cpu); total=$1; idle=$2
+  now_io=$(io)
+  dt=$((total - last_total)); di=$((idle - last_idle)); dio=$((now_io - last_io))
+  last_total=$total; last_idle=$idle; last_io=$now_io
+  [ $dt -gt 0 ] || continue
+  pct=$((di * 100 / dt))
+  if [ $pct -ge 85 ] && [ $dio -lt $((4096 * INTERVAL)) ]; then quiet_for=$((quiet_for + INTERVAL)); else quiet_for=0; fi
+  if [ $pct -ge 95 ] && [ $dio -lt $((1024 * INTERVAL)) ]; then idle_for=$((idle_for + INTERVAL)); else idle_for=0; trimmed=0; fi
+
+  if [ $idle_for -ge $IDLE_S ] && [ $trimmed -eq 0 ]; then
+    before=$(cached_mb)
+    trimmed=1
+    slab=$(awk '/^SReclaimable:/{print int($2/1024)}' /proc/meminfo)
+    [ "$before" -ge "$MIN_MB" ] || [ "$slab" -ge "$MIN_MB" ] || continue
+    slab_before=$(awk '/^SReclaimable:/{print int($2/1024)}' /proc/meminfo)
+    sync
+    echo 3 > /proc/sys/vm/drop_caches
+    echo 1 > /proc/sys/vm/compact_memory
+    log "idle ${idle_for}s: page cache ${before} -> $(cached_mb) MiB, reclaimable slab ${slab_before} -> $(awk '/^SReclaimable:/{print int($2/1024)}' /proc/meminfo) MiB"
+  elif [ $quiet_for -ge $QUIET_S ]; then
+    quiet_for=0
+    cg=/sys/fs/cgroup/docker
+    [ -w $cg/memory.reclaim ] || continue
+    file_mb=$(awk '/^file /{print int($2/1048576)}' $cg/memory.stat)
+    [ "${file_mb:-0}" -ge "$MIN_MB" ] || continue
+    echo "$((file_mb / 2))M" > $cg/memory.reclaim 2>/dev/null
+    echo 1 > /proc/sys/vm/compact_memory
+    log "quiet: containers' page cache ${file_mb} -> $(awk '/^file /{print int($2/1048576)}' $cg/memory.stat) MiB"
+  fi
+done

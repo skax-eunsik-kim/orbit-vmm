@@ -1,0 +1,8 @@
+::sysinit:/etc/orbit/boot.sh
+::respawn:/etc/orbit/dns.sh
+::respawn:/etc/orbit/dockerd.sh
+::respawn:/etc/orbit/memd.sh
+::respawn:/usr/bin/socat -t 86400 VSOCK-LISTEN:2375,fork,reuseaddr,backlog=512 UNIX-CONNECT:/var/run/docker.sock
+::respawn:/usr/bin/socat -u VSOCK-LISTEN:1026,fork,reuseaddr,backlog=64 EXEC:/etc/orbit/fsnotify.sh
+::respawn:/usr/bin/socat VSOCK-LISTEN:1025,fork,reuseaddr,backlog=64 EXEC:/etc/orbit/control.sh
+::shutdown:/etc/orbit/shutdown.sh

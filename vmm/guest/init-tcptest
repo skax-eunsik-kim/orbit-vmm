@@ -1,0 +1,10 @@
+#!/bin/sh
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc; mount -t sysfs sysfs /sys; mount -t devtmpfs devtmpfs /dev
+tar xzf /linux-virt.apk -C / lib/modules 2>/dev/null
+modprobe virtio_mmio; modprobe virtio_net
+ip link set lo up; ip link set eth0 up; ip addr add 10.0.2.15/24 dev eth0; ip route add default via 10.0.2.2
+for i in 1 2 3 4 5 6; do
+  /usr/bin/time -f "TCPTEST connect %e s" nc -z -w 5 151.101.0.223 443 2>&1 | grep TCPTEST
+done
+poweroff -f
