@@ -48,6 +48,11 @@ All notable changes are listed here. The format follows
 - RENAME_EXCHANGE swaps node paths directly.
 - The "port in use" warning is printed once per port.
 - The balloon range uses checked math.
+- The VMM resolves allowlist entries itself and refuses any entry that
+  resolves through a symlink inside a shared directory. A container could
+  repoint such a link to widen what gets shared on the next start.
+- Renames are checked against the path-length and node-memory limits for
+  every remembered path they move.
 
 ## [0.1.0] - 2026-10-17
 

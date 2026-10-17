@@ -35,7 +35,8 @@ These are deliberate trade-offs, documented so you can decide for yourself:
   the checkout, and `make up` builds nothing. The VMM refuses to share your
   home directory or anything above it, hidden directories, or `~/Library`. It
   also never lets the guest rename, remove or replace the shared directories
-  themselves.
+  themselves, and refuses entries that resolve through a symlink located
+  inside a shared directory.
 - **Containers can reach the Mac's localhost services**
   (`host.docker.internal`, like Docker Desktop). Turn this off with
   `ORBIT_HOST_LOOPBACK=0`.

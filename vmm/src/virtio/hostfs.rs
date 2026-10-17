@@ -102,6 +102,47 @@ pub fn fstat(f: &impl AsRawFd) -> Result<Attr, i32> {
     Ok(Attr::from_stat(&st))
 }
 
+/// The name and ".." components of `p`, in order.
+fn parts(p: &Path) -> Vec<std::ffi::OsString> {
+    p.components()
+        .filter(|c| matches!(c, Component::Normal(_) | Component::ParentDir))
+        .map(|c| c.as_os_str().to_owned())
+        .collect()
+}
+
+/// Resolves `p` one component at a time and returns where each symlink it
+/// passes through lives (with that location's parent already resolved).
+fn symlinks_on_the_way(p: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut todo: std::collections::VecDeque<std::ffi::OsString> = parts(p).into();
+    let mut cur = PathBuf::from("/");
+    let mut links = Vec::new();
+    while let Some(c) = todo.pop_front() {
+        if c == ".." {
+            cur.pop();
+            continue;
+        }
+        let next = cur.join(&c);
+        let meta = std::fs::symlink_metadata(&next).map_err(|e| format!("allowed path {}: {e}", p.display()))?;
+        if !meta.file_type().is_symlink() {
+            cur = next;
+            continue;
+        }
+        if links.len() >= 40 {
+            return Err(format!("allowed path {}: too many symlinks", p.display()));
+        }
+        let target = std::fs::read_link(&next).map_err(|e| e.to_string())?;
+        links.push(next);
+        if target.is_absolute() {
+            cur = PathBuf::from("/");
+        }
+        let rest: Vec<_> = parts(&target);
+        for c in rest.into_iter().rev() {
+            todo.push_front(c);
+        }
+    }
+    Ok(links)
+}
+
 fn lower(p: &Path) -> PathBuf {
     PathBuf::from(OsStr::from_bytes(&p.as_os_str().as_bytes().to_ascii_lowercase()))
 }
@@ -148,13 +189,12 @@ impl Root {
             .ok_or("HOME is not set or does not exist")?;
         let mut allowed = Vec::new();
         for a in allow {
-            // Allowed directories must exist, lie inside the share, and be given
-            // by their real path: no symlinks, exact case. (A symlink there could
-            // later be repointed; a case variant could slip past the checks below.)
-            let c = a.canonicalize().map_err(|e| format!("allowed path {}: {e}", a.display()))?;
-            if c != *a {
-                return Err(format!("allowed path {} must be given as its real path {}", a.display(), c.display()));
+            // Allowed directories must exist and lie inside the share; every check
+            // below works on the real path (no symlinks, exact case).
+            if !a.is_absolute() {
+                return Err(format!("allowed path {} must be absolute", a.display()));
             }
+            let c = a.canonicalize().map_err(|e| format!("allowed path {}: {e}", a.display()))?;
             if !c.starts_with(path) {
                 return Err(format!("allowed path {} is outside the share {}", c.display(), path.display()));
             }
@@ -172,6 +212,21 @@ impl Root {
                     a.display(),
                     b.display()
                 ));
+            }
+        }
+        // How each path resolves must not depend on anything the guest can
+        // change: a symlink inside a shared directory could be repointed by a
+        // container, and the next start would share wherever it points.
+        for a in allow {
+            for link in symlinks_on_the_way(a)? {
+                let parent = link.parent().unwrap_or(Path::new("/"));
+                if allowed.iter().any(|d| lower(parent).starts_with(lower(d))) {
+                    return Err(format!(
+                        "allowed path {} resolves through {}, a symlink inside a shared directory",
+                        a.display(),
+                        link.display()
+                    ));
+                }
             }
         }
         Ok(Root { path: path.to_path_buf(), fd: unsafe { OwnedFd::from_raw_fd(fd) }, allow: allowed })

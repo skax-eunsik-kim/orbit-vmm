@@ -27,31 +27,34 @@ if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then echo "previous VM $OLD stil
 if [ -z "${ORBIT_SHARE_ALLOW:-}" ]; then
   for d in work src code dev projects Developer; do [ -d "$HOME/$d" ] && ORBIT_SHARE_ALLOW="${ORBIT_SHARE_ALLOW:+$ORBIT_SHARE_ALLOW:}$HOME/$d"; done
 fi
-# Passed to the VMM by their real paths (it rejects anything else, and refuses
-# to share your home directory, hidden directories or ~/Library: containers
-# can write to shared directories).
-ALLOW=(); REAL=()
+# The VMM resolves each entry itself and refuses your home directory, hidden
+# directories, ~/Library, nested entries, and paths that resolve through a
+# symlink inside a shared directory (containers can write to those).
+ALLOW=(); LIT=(); REAL=()
 IFS=: read -ra dirs <<< "${ORBIT_SHARE_ALLOW:-}"
 for d in "${dirs[@]}"; do
   [ -n "$d" ] || continue
+  case "$d" in /*) ;; *) d="$PWD/$d" ;; esac
   r="$(realpath "$d" 2>/dev/null)" && [ -d "$r" ] || { echo "shared directory $d does not exist" >&2; exit 1; }
-  REAL+=("$r")
+  LIT+=("$d"); REAL+=("$r")
 done
 # One directory inside another is already shared by the outer one (and the VMM
 # refuses nested entries), so keep only the outermost.
-for r in ${REAL[@]+"${REAL[@]}"}; do
+SHARES=()
+for ((k = 0; k < ${#REAL[@]}; k++)); do
+  r=${REAL[k]}
   inner=0
   for o in "${REAL[@]}"; do
     lr=$(printf %s "$r" | tr '[:upper:]' '[:lower:]'); lo=$(printf %s "$o" | tr '[:upper:]' '[:lower:]')
     case "$lr" in "$lo"/*) inner=1 ;; esac
   done
   [ $inner = 1 ] && continue
-  case " ${ALLOW[*]-} " in *" $r "*) continue ;; esac
-  ALLOW+=(--share-allow "$r")
+  case " ${SHARES[*]-} " in *" $r "*) continue ;; esac
+  ALLOW+=(--share-allow "${LIT[k]}"); SHARES+=("$r")
   case "$VMM" in "$r"/*) echo "warning: running $VMM from inside shared $r; containers could replace it (use make install)" >&2 ;; esac
 done
 if [ ${#ALLOW[@]} -eq 0 ]; then echo "no shared directories (set ORBIT_SHARE_ALLOW)" >&2; exit 1; fi
-for ((i = 1; i < ${#ALLOW[@]}; i += 2)); do printf '%s\n' "${ALLOW[i]}"; done > "$D/shares"
+printf '%s\n' "${SHARES[@]}" > "$D/shares"
 
 NET_OPTS=()
 [ "${ORBIT_HOST_LOOPBACK:-1}" = 0 ] && NET_OPTS+=(--no-host-loopback)

@@ -895,17 +895,31 @@ impl Server {
         };
         // Hold the table lock across the syscall so lookups never see a half-moved tree.
         let mut t = self.tables.lock().unwrap();
+        let pairs: &[(&Path, &Path)] =
+            if flags == RENAME_EXCHANGE { &[(&from, &to), (&to, &from)] } else { &[(&from, &to)] };
+        let moves = plan_moves(&t, pairs);
+        // Moving a tree under a longer name lengthens every remembered path below
+        // it: keep that within the same limits as new lookups.
+        let max_path = self.root.path().as_os_str().len() + MAX_PATH_BYTES;
+        let mut grown = t.path_bytes as i128;
+        for (old, new, _) in &moves {
+            if new.as_os_str().len() > max_path {
+                return Err(ENAMETOOLONG);
+            }
+            grown += new.as_os_str().len() as i128 - old.as_os_str().len() as i128;
+        }
+        if grown > MAX_NODE_PATH_BYTES as i128 {
+            return Err(ENOMEM);
+        }
         self.root.rename(&from, &to, darwin_flags)?;
-        if flags == RENAME_EXCHANGE {
-            repoint(&mut t, &[(&from, &to), (&to, &from)]);
-        } else {
+        if flags != RENAME_EXCHANGE {
             // Whatever `to` was is gone; its nodes are stale.
             let stale: Vec<PathBuf> = t.by_path.keys().filter(|p| p.starts_with(&to)).cloned().collect();
             for p in stale {
                 t.by_path.remove(&p);
             }
-            repoint(&mut t, &[(&from, &to)]);
         }
+        apply_moves(&mut t, moves);
         Ok(Vec::new())
     }
 
@@ -988,11 +1002,11 @@ impl Server {
     }
 }
 
-/// Re-points, for each (from, to), the node at `from` and everything below it
-/// to `to`. All moves are computed first, so an exchange is just both pairs.
-fn repoint(t: &mut Tables, moves: &[(&Path, &Path)]) {
+/// For each (from, to): the node at `from` and everything below it, with its
+/// path under `to`. All moves are computed first, so an exchange is both pairs.
+fn plan_moves(t: &Tables, pairs: &[(&Path, &Path)]) -> Vec<(PathBuf, PathBuf, u64)> {
     let mut moved = Vec::new();
-    for &(from, to) in moves {
+    for &(from, to) in pairs {
         for (old, id) in t.by_path.iter().filter(|(p, _)| p.starts_with(from)) {
             // join("") would append a trailing slash and turn the file into a "directory".
             let rel = old.strip_prefix(from).unwrap();
@@ -1000,6 +1014,10 @@ fn repoint(t: &mut Tables, moves: &[(&Path, &Path)]) {
             moved.push((old.clone(), new, *id));
         }
     }
+    moved
+}
+
+fn apply_moves(t: &mut Tables, moved: Vec<(PathBuf, PathBuf, u64)>) {
     for (old, _, _) in &moved {
         t.by_path.remove(old);
     }
