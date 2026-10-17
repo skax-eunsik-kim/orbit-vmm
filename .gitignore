@@ -10,3 +10,5 @@ bench/tmp-multi/
 bench/results.txt
 bench/mem-results.txt
 bench/devflow/results-*.txt
+__pycache__/
+*.pyc
