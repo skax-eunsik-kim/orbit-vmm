@@ -15,6 +15,9 @@ use std::path::PathBuf;
 ///             [--net] [--no-host-loopback] [--fwd tcp:<host port>:<guest port>]...
 ///             [--vsock <unix socket path>:<guest port>]...
 ///             [--share <host dir>:<virtiofs tag>]... [--share-allow <dir>]...
+///
+/// Exit status: 0 when the guest powers off, 3 when it reboots (or its kernel
+/// panics), 1 on a VMM error, 2 for bad arguments. Signals as usual.
 pub struct Config {
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,

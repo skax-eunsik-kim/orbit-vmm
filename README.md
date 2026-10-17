@@ -128,7 +128,8 @@ remove the shared directories themselves.
 | `~/.orbit/guest/` | Kernel and initramfs built by `make guest`. |
 | `~/.orbit/vmm/data.img` | Data disk (Docker images, volumes). |
 | `~/.orbit/vmm/docker.sock` | Docker API. |
-| `~/.orbit/vmm/console.log` | Guest console; look here first when something fails. |
+| `~/.orbit/vmm/console.log` | Guest console; look here first when something fails (`console.prev.log` is the previous run). |
+| `~/.orbit/vmm/watchdog.log`, `crashes/` | Supervisor log and records of unexpected stops. |
 
 **Don't share `~/.orbit/guest/*` or `data.img`.** They contain GPL binaries
 and your machine's trusted root certificates
@@ -148,6 +149,35 @@ git pull && make guest install up
 ```
 
 The first boot after a guest upgrade reinstalls guest packages (about 1 min).
+
+## Watchdog (optional)
+
+```bash
+./scripts/install-watchdog.sh     # after make install; --uninstall removes it
+```
+
+This installs a launchd agent, `com.orbit.vmm`, that runs the VM and
+recovers it:
+
+- **Crash:** if the VMM dies, or the guest reboots or panics, launchd starts
+  it again within seconds.
+- **Hang:** the guest is pinged every 30 s. After three missed pings the VMM
+  is aborted, so macOS writes a crash report, and then it is restarted. That
+  takes about 90 s.
+- **Crash loop:** after more than three starts in 10 minutes it stops
+  restarting and tells you.
+- **Crash records:** each unexpected stop is kept in
+  `~/.orbit/vmm/crashes/<time>/` (console log, macOS crash report, watchdog
+  log). The 10 newest are kept, and you get a macOS notification. Containers
+  stop with the VM, so ones without a `restart:` policy have to be started
+  again.
+- **On purpose:** `make down` (`vmm-up.sh --stop`) and a guest `poweroff`
+  count as intended stops and are not restarted. A VM that was running when
+  you logged out starts again at login.
+
+Without the watchdog, `make up` runs the same supervisor in the background,
+so hangs are still detected and crashes still recorded, but nothing is
+restarted.
 
 ## Health check (optional)
 

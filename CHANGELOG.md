@@ -5,6 +5,21 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Watchdog: `scripts/install-watchdog.sh` installs a launchd agent that
+  restarts the VM after a crash, a guest reboot or panic, or a hang. A hang
+  is three missed control-socket pings; the VMM is aborted first so macOS
+  writes a crash report.
+  - It stops restarting after more than three starts in 10 minutes.
+  - Each unexpected stop is recorded in `crashes/<time>/` with a
+    notification.
+- `scripts/vmm-run.sh` supervises the VM in both modes. `vmm-up.sh --stop`
+  (`make down`) stops it on purpose.
+- The VMM exits with status 3 when the guest asks for a reset (reboot or
+  kernel panic) instead of 0.
+- `console.log` from the previous run is kept as `console.prev.log`.
+
 ### Security
 
 - Run the VMM, `vmm-up.sh` and the health check from an installed copy in

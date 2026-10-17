@@ -10,7 +10,7 @@ help:
 	@echo "make build    build and sign vmm/target/release/orbit-vmm"
 	@echo "make install  build, then copy the VMM and scripts to ~/.orbit/bin (outside shared dirs)"
 	@echo "make up       (re)start the VM from ~/.orbit/bin (builds nothing)"
-	@echo "make down     shut the VM down"
+	@echo "make down     shut the VM down (the watchdog won't restart it)"
 	@echo "make lint     cargo fmt --check, clippy -D warnings, shellcheck"
 	@echo "make test     cargo test"
 	@echo "make devflow  run the developer-workflow checks against the running VM"
@@ -31,7 +31,7 @@ up:
 	$(HOME)/.orbit/bin/vmm-up.sh
 
 down:
-	@echo shutdown | nc -U -w 3 $(HOME)/.orbit/vmm/control.sock || true
+	$(HOME)/.orbit/bin/vmm-up.sh --stop
 
 test:
 	cd vmm && cargo test

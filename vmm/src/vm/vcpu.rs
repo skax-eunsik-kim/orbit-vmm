@@ -486,6 +486,8 @@ const PSCI_CPU_OFF: u64 = 0x8400_0002;
 const PSCI_CPU_ON_64: u64 = 0xc400_0003;
 const PSCI_AFFINITY_INFO_64: u64 = 0xc400_0004;
 const PSCI_MIGRATE_INFO_TYPE: u64 = 0x8400_0006;
+/// Process exit status when the guest requests a reset.
+pub const EXIT_RESET: i32 = 3;
 const PSCI_SYSTEM_OFF: u64 = 0x8400_0008;
 const PSCI_SYSTEM_RESET: u64 = 0x8400_0009;
 const PSCI_FEATURES: u64 = 0x8400_000a;
@@ -532,8 +534,14 @@ fn psci(m: &Machine, cpu: &Vcpu) -> Option<bool> {
             }
         }
         PSCI_CPU_OFF => return Some(true),
-        PSCI_SYSTEM_OFF | PSCI_SYSTEM_RESET => {
+        // Exit status: 0 = the guest powered off, EXIT_RESET = it asked to reboot
+        // (`reboot`, or a kernel panic with panic=-1); the watchdog restarts it.
+        PSCI_SYSTEM_OFF => {
             m.power_off(0);
+            return Some(false);
+        }
+        PSCI_SYSTEM_RESET => {
+            m.power_off(EXIT_RESET);
             return Some(false);
         }
         _ => PSCI_NOT_SUPPORTED,
