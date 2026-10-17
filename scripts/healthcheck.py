@@ -77,7 +77,12 @@ def ask(sock_path, line, timeout=3):
     s.connect(sock_path)
     s.sendall(line.encode())
     out = b""
+    deadline = time.monotonic() + timeout  # overall, not per read: the guest is untrusted
     while len(out) <= MAX_REPLY:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("control socket reply took too long")
+        s.settimeout(left)
         chunk = s.recv(4096)
         if not chunk:
             break

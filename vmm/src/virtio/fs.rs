@@ -281,6 +281,26 @@ fn open_out(fh: u64, flags: u32) -> Vec<u8> {
 // like on Docker Desktop. ORBIT_FS_OWNERSHIP=host reports the real host owner.
 
 const OWNER_XATTR: &std::ffi::CStr = c"user.orbit.owner";
+/// The mode the guest set, when the Mac file got a safer one (see host_mode).
+const MODE_XATTR: &std::ffi::CStr = c"user.orbit.mode";
+
+/// What a guest-requested mode becomes on the Mac file: no setuid/setgid and
+/// no group/other write. Otherwise a container could hand other local Mac
+/// users a setuid-you binary or world-writable project files. The guest still
+/// sees the mode it asked for (MODE_XATTR).
+fn host_mode(mode: u32) -> u32 {
+    mode & 0o1755
+}
+
+/// Records the guest-visible mode of `path` when it differs from the Mac one.
+fn set_mode(root: &Root, path: &Path, mode: u32) -> Result<(), i32> {
+    if !emulate_ownership() {
+        return Ok(());
+    }
+    let mode = mode & 0o7777;
+    let v = format!("{mode:o}");
+    root.set_xattr(path, MODE_XATTR, (host_mode(mode) != mode).then_some(v.as_bytes()))
+}
 
 fn emulate_ownership() -> bool {
     static E: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -304,7 +324,14 @@ fn view(root: &Root, path: &Path, attr: Attr) -> View {
     if let Some(v) = root.get_xattr(path, OWNER_XATTR) {
         if let Some((u, g)) = std::str::from_utf8(&v).ok().and_then(|t| t.split_once(':')) {
             if let (Ok(u), Ok(g)) = (u.parse(), g.parse()) {
-                return View { attr, uid: u, gid: g, mode: attr.mode };
+                let recorded = root
+                    .get_xattr(path, MODE_XATTR)
+                    .and_then(|m| u32::from_str_radix(std::str::from_utf8(&m).ok()?, 8).ok());
+                let mode = match recorded {
+                    Some(m) => (attr.mode & libc::S_IFMT as u32) | (m & 0o7777),
+                    None => attr.mode,
+                };
+                return View { attr, uid: u, gid: g, mode };
             }
         }
     }
@@ -523,9 +550,13 @@ impl Server {
     }
 
     /// Gives a file the creating process's owner (and so its exact mode).
-    fn created(&self, path: &Path, caller: (u32, u32)) -> Result<(), i32> {
+    fn created(&self, path: &Path, caller: (u32, u32), mode: Option<u32>) -> Result<(), i32> {
         self.touched(path);
-        set_owner(&self.root, path, caller)
+        set_owner(&self.root, path, caller)?;
+        match mode {
+            Some(m) => set_mode(&self.root, path, m),
+            None => Ok(()),
+        }
     }
 
     /// Notes that the guest itself changed `path`.
@@ -621,7 +652,7 @@ impl Server {
                 self.child(node, &name).and_then(|p| {
                     self.replaceable(&p)?;
                     self.root.symlink(&target, &p)?;
-                    self.created(&p, caller)?;
+                    self.created(&p, caller, None)?;
                     self.entry(p)
                 })
             }
@@ -634,8 +665,8 @@ impl Server {
                 } else {
                     self.child(node, name).and_then(|p| {
                         self.replaceable(&p)?;
-                        self.root.open_file(&p, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, mode & 0o7777)?;
-                        self.created(&p, caller)?;
+                        self.root.open_file(&p, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, host_mode(mode))?;
+                        self.created(&p, caller, Some(mode))?;
                         self.entry(p)
                     })
                 }
@@ -646,8 +677,8 @@ impl Server {
                 let name = r.name();
                 self.child(node, name).and_then(|p| {
                     self.replaceable(&p)?;
-                    self.root.mkdir(&p, mode & !umask & 0o7777)?;
-                    self.created(&p, caller)?;
+                    self.root.mkdir(&p, host_mode(mode & !umask))?;
+                    self.created(&p, caller, Some(mode & !umask))?;
                     self.entry(p)
                 })
             }
@@ -709,8 +740,8 @@ impl Server {
                 r.skip(4);
                 let name = r.name();
                 self.child(node, name).and_then(|p| {
-                    let fh = self.open(&p, flags | 0o100, Some(mode & !umask & 0o7777))?;
-                    self.created(&p, caller)?;
+                    let fh = self.open(&p, flags | 0o100, Some(host_mode(mode & !umask)))?;
+                    self.created(&p, caller, Some(mode & !umask))?;
                     let mut out = self.entry(p)?;
                     out.extend_from_slice(&open_out(fh, 0));
                     Ok(out)
@@ -957,7 +988,15 @@ impl Server {
                 let v = self.view(&path)?;
                 set_owner(&self.root, &path, (v.uid, v.gid))?;
             }
-            self.root.chmod(&path, mode & 0o7777)?;
+            // Allowed directories keep their Mac mode (they are like mount points).
+            if self.root.is_allowed_root(&path) {
+                if emulate_ownership() {
+                    self.root.set_xattr(&path, MODE_XATTR, Some(format!("{:o}", mode & 0o7777).as_bytes()))?;
+                }
+            } else {
+                self.root.chmod(&path, host_mode(mode))?;
+                set_mode(&self.root, &path, mode)?;
+            }
         }
         if valid & FATTR_SIZE != 0 {
             let via_fh = if valid & FATTR_FH != 0 {

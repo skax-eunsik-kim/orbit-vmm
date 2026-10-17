@@ -17,7 +17,8 @@ orbit-vmm is a development tool that runs on your own Mac. These are in scope:
   rename races or xattrs.
 - A guest or container reaching host memory or host files outside shared
   directories, or crashing the VMM from inside the guest.
-- Other local users reaching the VMM's Unix sockets (they are created `0600`).
+- Other local users reaching the VMM's Unix sockets (they are created `0600`),
+  or using files a container made setuid or world-writable on the Mac.
 - Supply-chain issues in `scripts/fetch-guest.sh`, such as checksum or pinning
   bypasses.
 

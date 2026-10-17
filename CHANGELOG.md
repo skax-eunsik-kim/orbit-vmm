@@ -56,6 +56,15 @@ All notable changes are listed here. The format follows
 - The symlink check compares real paths, so Unicode normalisation (NFC vs
   NFD) and firmlink spellings can't slip past it.
 - READDIR reply size is capped.
+- Container `chmod` and create modes no longer reach the Mac file as given.
+  The Mac file never gets setuid/setgid or group/other write, and the guest
+  still sees the mode it set (`user.orbit.mode` xattr). Allowed directories
+  keep their Mac mode. Before, a container could hand other local users a
+  setuid binary or world-writable project files.
+- The VMM refuses a share that exposes the home directory when there is no
+  allowlist, and checks the `/System/Volumes/Data` spelling of home too.
+- The health check has an overall deadline on control-socket replies and
+  needs Python 3.11+.
 
 ## [0.1.0] - 2026-10-17
 

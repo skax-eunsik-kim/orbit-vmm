@@ -28,8 +28,9 @@ memory, so freed memory can actually be returned.
 - **Bind mounts over virtio-fs.** `-v $PWD:/app` works at the same path as on
   the Mac. It has multiple request queues, attribute caching and readdirplus.
   Mac edits fire inotify events in containers, so `uvicorn --reload`, vite and
-  nodemon hot reload works. `chown` inside a container works too (it is
-  emulated with xattrs; the real file stays yours).
+  nodemon hot reload works. `chown` and `chmod` inside a container work too.
+  Both are emulated with xattrs. The real file stays yours and never becomes
+  setuid or group- or world-writable on the Mac.
 - **Opt-in sharing.** Only allowed directories are visible to the VM, and
   path walks are symlink-safe. A container with the Docker socket can't read
   `~/.ssh`.

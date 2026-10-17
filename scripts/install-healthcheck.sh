@@ -10,6 +10,7 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 # usually in a shared directory that containers can write to.
 HC="$HOME/.orbit/bin/healthcheck.py"
 PY="$(command -v python3)"
+"$PY" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { echo "need Python 3.11+ (found $("$PY" -V)); brew install python" >&2; exit 1; }
 
 if [ "${1:-}" = --uninstall ]; then
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true

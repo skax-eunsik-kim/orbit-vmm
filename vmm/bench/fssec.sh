@@ -18,6 +18,10 @@ refused() { # refused <name> <allow path>
 refused "home directory in other case" "$(echo "$HOME" | tr '[:lower:]' '[:upper:]')"
 refused "home directory" "$HOME"
 refused "hidden directory" "$HOME/.orbit"
+if "$BIN" --kernel "$HOME/.orbit/guest/kernel" --initrd /dev/null --mem 256 --cpus 1 --share "$HOME:h" >"$LOG.r" 2>&1 </dev/null; then
+  echo "SEC FAIL host: accepted home as share with no allowlist"
+elif grep -q refusing "$LOG.r"; then echo "SEC ok   host: refuses home as share with no allowlist"
+else echo "SEC FAIL host: home share failed for another reason: $(tail -1 "$LOG.r")"; fi
 mkdir -p "$S/allowed/inner"
 refused2() { # refused2 <name> <expected error> <allow path> <allow path>
   if "$BIN" --kernel "$HOME/.orbit/guest/kernel" --initrd /dev/null --mem 256 --cpus 1 --share "/Users:users" \
@@ -47,4 +51,6 @@ for i in $(seq 1 200); do grep -q ready-for-swap "$LOG" && break; sleep 0.1; don
 mv "$S/allowed/swap" "$S/allowed/swap.real" && ln -s "$O" "$S/allowed/swap" && touch "$S/allowed/swapped"
 wait $P
 grep '^SEC' "$LOG" | grep -v ready
+m=$(stat -f %Lp "$S/allowed/suid" 2>/dev/null)
+[ "$m" = 755 ] && echo "SEC ok   host: guest chmod 4777 is 755 on the Mac" || echo "SEC FAIL host: guest chmod 4777 left mode $m on the Mac"
 [ -e "$O/planted.txt" ] && echo "SEC FAIL host: file planted outside the share" || echo "SEC ok   host: nothing written outside the share"

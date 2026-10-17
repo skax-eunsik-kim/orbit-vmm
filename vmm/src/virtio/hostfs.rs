@@ -150,6 +150,13 @@ fn lower(p: &Path) -> PathBuf {
 /// Containers can write to shared directories, so sharing these would let
 /// them run code on the Mac (shell profiles, LaunchAgents, ~/.orbit/bin) or
 /// read credentials (~/.ssh and other dot-directories).
+/// unsafe_share for both spellings of the home directory (/Users/... and the
+/// Data-volume firmlink /System/Volumes/Data/Users/...).
+fn unsafe_share_any(home: &Path, dir: &Path) -> Option<&'static str> {
+    let data = Path::new("/System/Volumes/Data").join(home.strip_prefix("/").unwrap_or(home));
+    unsafe_share(home, dir).or_else(|| unsafe_share(&data, dir))
+}
+
 fn unsafe_share(home: &Path, dir: &Path) -> Option<&'static str> {
     if home.starts_with(dir) {
         return Some("it contains your home directory");
@@ -187,6 +194,14 @@ impl Root {
             .map(PathBuf::from)
             .and_then(|h| h.canonicalize().ok())
             .ok_or("HOME is not set or does not exist")?;
+        // With no allowlist the whole share is writable, so the share itself
+        // must pass the same test.
+        if allow.is_empty() {
+            let c = path.canonicalize().map_err(|e| format!("share {}: {e}", path.display()))?;
+            if let Some(why) = unsafe_share_any(&home, &c) {
+                return Err(format!("refusing to share {} without --share-allow: {why}", c.display()));
+            }
+        }
         let mut allowed = Vec::new();
         for a in allow {
             // Allowed directories must exist and lie inside the share; every check
@@ -198,7 +213,7 @@ impl Root {
             if !c.starts_with(path) {
                 return Err(format!("allowed path {} is outside the share {}", c.display(), path.display()));
             }
-            if let Some(why) = unsafe_share(&home, &c) {
+            if let Some(why) = unsafe_share_any(&home, &c) {
                 return Err(format!("refusing to share {}: {why}", c.display()));
             }
             allowed.push(c);
