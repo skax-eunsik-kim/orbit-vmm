@@ -53,6 +53,9 @@ All notable changes are listed here. The format follows
   repoint such a link to widen what gets shared on the next start.
 - Renames are checked against the path-length and node-memory limits for
   every remembered path they move.
+- The symlink check compares real paths, so Unicode normalisation (NFC vs
+  NFD) and firmlink spellings can't slip past it.
+- READDIR reply size is capped.
 
 ## [0.1.0] - 2026-10-17
 

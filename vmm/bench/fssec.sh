@@ -32,6 +32,13 @@ rmdir "$S/allowed/inner"
 mkdir -p "$S/other"; ln -s "$S/other" "$S/allowed/link"
 refused2 "allow via a symlink in a share" "resolves through" "$S/allowed" "$S/allowed/link"
 rm -f "$S/allowed/link"
+# Same, with the shared directory stored as NFD on disk but given as NFC (how
+# Hangul and accented names usually get typed).
+NFD=$(python3 -I -c 'import unicodedata;print(unicodedata.normalize("NFD","작업"))')
+NFC=$(python3 -I -c 'import unicodedata;print(unicodedata.normalize("NFC","작업"))')
+mkdir -p "$S/$NFD"; ln -s "$S/other" "$S/$NFD/link"
+refused2 "allow via a symlink in a share (NFC vs NFD)" "resolves through" "$S/$NFC" "$S/$NFC/link"
+rm -f "$S/$NFD/link"; rmdir "$S/$NFD"
 rm -f "$LOG.r"
 "$BIN" --kernel "$HOME/.orbit/guest/kernel" --initrd "$HOME/.orbit/vmm/fssec.cpio.gz" --mem 768 --cpus 2 \
   --share "$S:t" --share-allow "$S/allowed" > "$LOG" 2>&1 &

@@ -36,7 +36,10 @@ These are deliberate trade-offs, documented so you can decide for yourself:
   home directory or anything above it, hidden directories, or `~/Library`. It
   also never lets the guest rename, remove or replace the shared directories
   themselves, and refuses entries that resolve through a symlink located
-  inside a shared directory.
+  inside a shared directory. That check covers the directories shared by
+  this start. If you narrow the allowlist later, or run a second instance
+  with a different one, review symlinks that containers may have left in
+  directories you shared before.
 - **Containers can reach the Mac's localhost services**
   (`host.docker.internal`, like Docker Desktop). Turn this off with
   `ORBIT_HOST_LOOPBACK=0`.

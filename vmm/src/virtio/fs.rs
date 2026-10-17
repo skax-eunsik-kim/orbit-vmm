@@ -769,7 +769,8 @@ impl Server {
             FUSE_READDIR | FUSE_READDIRPLUS => {
                 let fh = r.u64();
                 let offset = r.u64() as usize;
-                let size = r.u32() as usize;
+                // The guest's buffer can't be bigger than what we let it read.
+                let size = r.u32().min(MAX_WRITE) as usize;
                 match self.get_handle(fh).as_deref() {
                     Ok(Handle::Dir { path, fd, entries, .. }) if opcode == FUSE_READDIRPLUS => {
                         Ok(self.readdirplus_out(path, fd, entries, offset, size))

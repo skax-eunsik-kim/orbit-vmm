@@ -219,8 +219,12 @@ impl Root {
         // container, and the next start would share wherever it points.
         for a in allow {
             for link in symlinks_on_the_way(a)? {
+                // Compare real paths with real paths: the walk keeps the spelling
+                // it was given (Unicode normalisation, firmlinks), the allowlist
+                // has the on-disk one.
                 let parent = link.parent().unwrap_or(Path::new("/"));
-                if allowed.iter().any(|d| lower(parent).starts_with(lower(d))) {
+                let parent = parent.canonicalize().map_err(|e| format!("allowed path {}: {e}", a.display()))?;
+                if allowed.iter().any(|d| lower(&parent).starts_with(lower(d))) {
                     return Err(format!(
                         "allowed path {} resolves through {}, a symlink inside a shared directory",
                         a.display(),
