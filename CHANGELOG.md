@@ -21,6 +21,11 @@ All notable changes are listed here. The format follows
   the Mac; with the cap the build peaked at 7.7 GB on the Mac and took no
   longer (337 s vs 358 s). The Mac caches `data.img` itself, so the guest
   copy was redundant.
+- The data disk supports discard (`F_PUNCHHOLE` on the image), and `memd`
+  runs `fstrim /data` once after boot and every 10 minutes when the VM is
+  quiet (`orbit.memd_trim`, 0 turns it off). Space Docker frees (pruned
+  images, build cache) now goes back to the Mac: a 35 GB image with 13 GB of
+  pruned build cache shrank to 16 GB, and the data stayed intact.
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
 

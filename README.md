@@ -173,7 +173,10 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
   If two VMs publish the same port, the second one's forward fails (logged).
 - **Bind mounts:** no file locks are shared between the Mac and containers.
   Unix sockets and FIFOs can't be created on bind mounts.
-- **Data disk:** it never shrinks (no discard yet).
+- **Data disk:** space Docker frees goes back to the Mac only when the guest
+  trims (`fstrim`, every 10 minutes when the VM is quiet, and once after boot),
+  so `docker system prune` shows up on the Mac a few minutes later. The image
+  never shrinks below what the guest has written but not freed.
 - **Missing pieces:** no installer, GUI, auto-start or Kubernetes.
 
 ## How it works

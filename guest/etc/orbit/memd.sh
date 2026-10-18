@@ -18,18 +18,21 @@
 #
 # Tunables (kernel command line): orbit.memd_idle=<s> (30), orbit.memd_quiet=<s>
 # (60), orbit.memd_min_mb=<MiB> (128: leave caches smaller than this alone),
-# orbit.memd_cache_mb=<MiB> (1024; 0 turns the cap off).
+# orbit.memd_cache_mb=<MiB> (1024; 0 turns the cap off), orbit.memd_trim=<s>
+# (600: fstrim /data this often when quiet; 0 turns it off).
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-IDLE_S=30; QUIET_S=60; MIN_MB=128; CACHE_MB=1024
+IDLE_S=30; QUIET_S=60; MIN_MB=128; CACHE_MB=1024; TRIM_S=600
 for arg in $(cat /proc/cmdline); do
   case "$arg" in
     orbit.memd_idle=*) IDLE_S=${arg#orbit.memd_idle=} ;;
     orbit.memd_quiet=*) QUIET_S=${arg#orbit.memd_quiet=} ;;
     orbit.memd_min_mb=*) MIN_MB=${arg#orbit.memd_min_mb=} ;;
     orbit.memd_cache_mb=*) CACHE_MB=${arg#orbit.memd_cache_mb=} ;;
+    orbit.memd_trim=*) TRIM_S=${arg#orbit.memd_trim=} ;;
   esac
 done
 case "$CACHE_MB" in '' | *[!0-9]*) CACHE_MB=1024 ;; esac
+case "$TRIM_S" in '' | *[!0-9]*) TRIM_S=600 ;; esac
 INTERVAL=5
 # Defragment in the background too, so free memory stays reportable.
 sysctl -qw vm.compaction_proactiveness=50 2>/dev/null
@@ -66,6 +69,16 @@ while sleep $INTERVAL; do
       log "cap ${CACHE_MB} MiB: reclaimed ~${capped} MiB of page cache in the last minute (now $(cached_mb) MiB)"
       capped=0
     fi
+  fi
+
+  # Disk: blocks Docker freed (pruned images, build cache) still take space in
+  # data.img until they are discarded; fstrim punches them out of the file.
+  # Once soon after boot (space freed by earlier versions), then every TRIM_S
+  # when the VM is quiet.
+  since_trim=$((${since_trim:-$TRIM_S} + INTERVAL))
+  if [ "$TRIM_S" -gt 0 ] && [ $since_trim -ge "$TRIM_S" ] && [ $quiet_for -ge 30 ]; then
+    since_trim=0
+    out=$(fstrim -v /data 2>&1) && log "fstrim: ${out}"
   fi
 
   if [ $idle_for -ge $IDLE_S ] && [ $trimmed -eq 0 ]; then
