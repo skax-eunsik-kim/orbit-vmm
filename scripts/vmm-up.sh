@@ -4,7 +4,8 @@
 # `vmm-up.sh --stop` shuts it down (and keeps the watchdog from restarting it).
 # Normally run as ~/.orbit/bin/vmm-up.sh (make install / make up). The VM runs
 # under vmm-run.sh, through the launchd watchdog if install-watchdog.sh set it up.
-# Env: ORBIT_MEM_MIB (default 8192; unused memory is returned to macOS), ORBIT_CPUS (default 4), ORBIT_DISK_GB,
+# Env: ORBIT_MEM_MIB (default 8192; unused memory is returned to macOS), ORBIT_CPUS (default: the Mac's core count), ORBIT_DISK_GB,
+#      ORBIT_GUEST (kernel + initramfs directory, default ~/.orbit/guest),
 #      ORBIT_SHARE_ALLOW, ORBIT_HOST_LOOPBACK=0 (containers can't reach the Mac's
 #      127.0.0.1 services), ORBIT_INSTANCE (run more than one VM: each instance
 #      gets its own ~/.orbit/vmm-<name> with its own disk and sockets).
@@ -45,7 +46,7 @@ if [ -n "${ORBIT_SHARE_ALLOW:-}" ]; then
   done
   ORBIT_SHARE_ALLOW=$abs
 fi
-for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK; do
+for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_GUEST ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK; do
   [ -n "${!v:-}" ] && printf '%s=%q\n' "$v" "${!v}"
 done > "$D/config.env"
 

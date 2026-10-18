@@ -26,6 +26,17 @@ A metadata-heavy bind-mount workload is 10–20x faster:
 - The net RX path copies slices.
 - Debug environment variables are read once.
 
+- The guest installs Docker 29.5 (Alpine v3.23) instead of 29.8 (v3.24).
+  Docker 29.8 rebuilt every layer on top of a locally built base image on
+  each warm build, because provenance changes the base image's digest.
+  On a sample monorepo the second warm build went from 347 s to 30 s
+  (OrbStack: 14 s).
+- `ORBIT_CPUS` defaults to the Mac's core count instead of 4. Idle vCPUs
+  park, and with 4 vCPUs parallel container start-up queued on CPU.
+- Published ports are picked up every 250 ms instead of every second.
+- `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
+  can boot a guest built elsewhere.
+
 ### Security
 
 - The supervisor and `vmm-up.sh` talk to the guest control socket only

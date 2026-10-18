@@ -91,8 +91,9 @@ S="$D/docker.sock"
 [ -f "$D/want-running" ] || { log "stop requested before start"; exit 0; }
 # Keep the previous run's console (vmm-up.sh used to overwrite it).
 [ -s "$D/console.log" ] && mv -f "$D/console.log" "$D/console.prev.log"
-"$VMM" --kernel "$HOME/.orbit/guest/kernel" --initrd "$HOME/.orbit/guest/initramfs" \
-  --mem "${ORBIT_MEM_MIB:-8192}" --cpus "${ORBIT_CPUS:-4}" --net ${NET_OPTS[@]+"${NET_OPTS[@]}"} --balloon --disk "$D/data.img" \
+G="${ORBIT_GUEST:-$HOME/.orbit/guest}"
+"$VMM" --kernel "$G/kernel" --initrd "$G/initramfs" \
+  --mem "${ORBIT_MEM_MIB:-8192}" --cpus "${ORBIT_CPUS:-$(sysctl -n hw.ncpu)}" --net ${NET_OPTS[@]+"${NET_OPTS[@]}"} --balloon --disk "$D/data.img" \
   --vsock "$S:2375" --vsock "$D/control.sock:1025" --vsock "$D/fsnotify.sock:1026" --share "/Users:users" "${ALLOW[@]}" \
   --cmdline "console=ttyAMA0 panic=-1 page_reporting.page_reporting_order=2 orbit.time=$(date +%s)" \
   > "$D/console.log" 2>&1 < /dev/null &
