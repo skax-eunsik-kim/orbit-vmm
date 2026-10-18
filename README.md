@@ -84,7 +84,8 @@ checkout outside your shared directories.
 | Variable | Default | Meaning |
 |---|---|---|
 | `ORBIT_MEM_MIB` | `8192` | Guest RAM ceiling. Freed memory returns to macOS, so a high ceiling costs little. |
-| `ORBIT_CPUS` | `4` | vCPUs. |
+| `ORBIT_CPUS` | Mac core count (`sysctl -n hw.ncpu`) | vCPUs. Idle vCPUs park and cost no CPU; with only a few, parallel container start-up (e.g. agent sandboxes) queues on CPU. |
+| `ORBIT_GUEST` | `~/.orbit/guest` | Directory with the guest `kernel` and `initramfs` (e.g. one built with `ORBIT_HOME=… scripts/fetch-guest.sh`). |
 | `ORBIT_DISK_GB` | `64` | Size of a **new** data disk (sparse file). |
 | `ORBIT_SHARE_ALLOW` | see below | Colon-separated directories that containers may bind-mount. |
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |

@@ -3,7 +3,8 @@
 #   DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 # Normally run as ~/.orbit/bin/vmm-up.sh (make install / make up), next to the
 # installed orbit-vmm; run from a checkout it uses that checkout's build.
-# Env: ORBIT_MEM_MIB (default 8192; unused memory is returned to macOS), ORBIT_CPUS (default 4), ORBIT_DISK_GB,
+# Env: ORBIT_MEM_MIB (default 8192; unused memory is returned to macOS), ORBIT_CPUS (default: the Mac's core count), ORBIT_DISK_GB,
+#      ORBIT_GUEST (kernel + initramfs directory, default ~/.orbit/guest),
 #      ORBIT_SHARE_ALLOW, ORBIT_HOST_LOOPBACK=0 (containers can't reach the Mac's
 #      127.0.0.1 services), ORBIT_INSTANCE (run more than one VM: each instance
 #      gets its own ~/.orbit/vmm-<name> with its own disk and sockets).
@@ -59,8 +60,9 @@ printf '%s\n' "${SHARES[@]}" > "$D/shares"
 NET_OPTS=()
 [ "${ORBIT_HOST_LOOPBACK:-1}" = 0 ] && NET_OPTS+=(--no-host-loopback)
 S="$D/docker.sock"
-nohup "$VMM" --kernel "$HOME/.orbit/guest/kernel" --initrd "$HOME/.orbit/guest/initramfs" \
-  --mem "${ORBIT_MEM_MIB:-8192}" --cpus "${ORBIT_CPUS:-4}" --net ${NET_OPTS[@]+"${NET_OPTS[@]}"} --balloon --disk "$D/data.img" \
+G="${ORBIT_GUEST:-$HOME/.orbit/guest}"
+nohup "$VMM" --kernel "$G/kernel" --initrd "$G/initramfs" \
+  --mem "${ORBIT_MEM_MIB:-8192}" --cpus "${ORBIT_CPUS:-$(sysctl -n hw.ncpu)}" --net ${NET_OPTS[@]+"${NET_OPTS[@]}"} --balloon --disk "$D/data.img" \
   --vsock "$S:2375" --vsock "$D/control.sock:1025" --vsock "$D/fsnotify.sock:1026" --share "/Users:users" "${ALLOW[@]}" \
   --cmdline "console=ttyAMA0 panic=-1 page_reporting.page_reporting_order=2 orbit.time=$(date +%s)" \
   > "$D/console.log" 2>&1 < /dev/null &

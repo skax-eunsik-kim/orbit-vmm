@@ -67,8 +67,13 @@ if [ -e /etc/orbit/booted-from-snapshot ]; then
   log "packages: from read-only root snapshot"
 else
   log "packages"
+  # Docker comes from v3.23 (29.5.x): 29.8.x in v3.24 keys BuildKit's cache on the
+  # base image's index digest, which provenance changes on every build, so warm
+  # rebuilds redo every layer on top of a locally built base (29.4/29.5 do not).
+  grep -q '^@docker ' /etc/apk/repositories \
+    || sed -n 's|^\(.*/alpine/\)v[0-9.]*/main$|@docker \1v3.23/community|p' /etc/apk/repositories | head -1 >> /etc/apk/repositories
   # Served from /data/apk-cache after the first boot, so later boots work offline.
-  apk add -q docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq qemu-x86_64 > /dev/hvc0 2>&1 || log "apk add failed"
+  apk add -q docker@docker docker-engine@docker docker-cli@docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq qemu-x86_64 > /dev/hvc0 2>&1 || log "apk add failed"
   # ca-certificates (pulled in by docker) regenerates the bundle; persist the host roots through it.
   cp /etc/orbit/host-ca.pem /usr/local/share/ca-certificates/host-ca.crt
   update-ca-certificates >/dev/null 2>&1

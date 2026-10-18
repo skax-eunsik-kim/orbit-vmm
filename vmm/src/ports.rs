@@ -1,6 +1,6 @@
 //! Publishes guest ports on the Mac's localhost, like Docker Desktop/OrbStack.
 //!
-//! Once a second, ask the guest (control vsock port 1025, `ports`) which TCP
+//! Every 250 ms, ask the guest (control vsock port 1025, `ports`) which TCP
 //! ports are listening on all addresses — docker-proxy does that for every
 //! `-p`/`ports:` mapping — and add or remove the matching slirp host forwards.
 
@@ -53,7 +53,7 @@ pub fn spawn(control_socket: PathBuf, net: PortControl, fixed: Vec<u16>) {
         .spawn(move || {
             let mut active: BTreeSet<u16> = BTreeSet::new();
             loop {
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(Duration::from_millis(250));
                 let Some(listening) = query(&control_socket) else {
                     continue;
                 };
