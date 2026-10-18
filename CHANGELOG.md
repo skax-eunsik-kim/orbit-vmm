@@ -15,6 +15,12 @@ All notable changes are listed here. The format follows
 - `ORBIT_CPUS` defaults to the Mac's core count instead of 4. Idle vCPUs
   park, and with 4 vCPUs parallel container start-up queued on CPU.
 - Published ports are picked up every 250 ms instead of every second.
+- `memd` keeps the guest page cache under 1 GiB at all times
+  (`orbit.memd_cache_mb`, 0 turns it off), not only once the VM goes idle.
+  During a monorepo build the cache had grown to 7 GB and the VM to 15 GB on
+  the Mac; with the cap the build peaked at 7.7 GB on the Mac and took no
+  longer (337 s vs 358 s). The Mac caches `data.img` itself, so the guest
+  copy was redundant.
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
 
