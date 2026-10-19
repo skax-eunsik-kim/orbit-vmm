@@ -51,6 +51,34 @@ memory, so freed memory can actually be returned.
 - Rust 1.87+ and libslirp: `brew install rust libslirp`.
 - Docker CLI with the compose plugin: `brew install docker docker-compose`.
 
+### On a macOS version orbit hasn't been tested on
+
+Tested so far on macOS 26.4. How Hypervisor.framework memory can be handed
+back to macOS, and how Activity Monitor counts it, are up to macOS, so check
+these three things on a new version before relying on it:
+
+1. **Memory release.** With no VM running:
+
+   ```bash
+   vmm/target/release/orbit-vmm --reclaim-selftest
+   ```
+
+   In the `guest RAM from hv_vm_allocate` block, the
+   `unmap + mmap(MAP_FIXED anon) + map` line must end near `released 1 MiB`.
+   That is the method the VMM uses (`vmm/src/reclaim.rs`). If it stays at
+   ~257 MiB, freed guest memory isn't returned on this version: the VM only
+   grows on the Mac.
+2. **Developer workflow.** With the VM up: `make devflow` must report
+   21 pass, 0 fail.
+3. **Activity Monitor.** Its Memory column is the VMM's `phys_footprint`.
+   When the Mac is short on memory, macOS compresses part of guest RAM and
+   that number grows past what the guest uses. In testing the gap was near
+   zero with nothing compressed and about a third to a half of the
+   compressed amount under pressure. A different gap on another macOS
+   version is a change in how macOS counts, not a leak, as long as
+   `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` show the VMM holding about what
+   the guest uses (see [docs/architecture.md](docs/architecture.md)).
+
 ## Quick start
 
 ```bash

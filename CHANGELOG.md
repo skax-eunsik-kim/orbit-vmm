@@ -5,6 +5,12 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- README: what to check on a macOS version orbit hasn't been tested on
+  (`--reclaim-selftest`, `make devflow`, how Activity Monitor's number
+  relates to what the guest uses).
+
 ### Disk
 
 - The build cache cap works again. Docker 28+ reads `defaultKeepStorage`
