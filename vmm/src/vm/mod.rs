@@ -124,6 +124,7 @@ fn setup_and_run(config: Config) -> Result<i32, String> {
     hv!(hv_vm_map(host, RAM_BASE, mem_size as usize, hvf::HV_MEMORY_READ | hvf::HV_MEMORY_WRITE | hvf::HV_MEMORY_EXEC))
         .map_err(|e| e.to_string())?;
     let mem = Arc::new(unsafe { GuestMemory::from_raw(host as *mut u8, mem_size) });
+    crate::memdump::spawn(mem.clone());
 
     let gic = gic::create().map_err(|e| e.to_string())?;
     let kicker = Arc::new(vcpu::Kicker::new());
