@@ -40,10 +40,6 @@ All notable changes are listed here. The format follows
 
 ### Performance
 
-- `memd` reclaims only page cache (`memory.reclaim` with `swappiness=0`).
-  Without it, capping the cache also pushed running services' memory into
-  zram: about 0.8 GB at a c2 stack's start, costing CPU and making services
-  fault it back in.
 A metadata-heavy bind-mount workload is 10–20x faster:
 
 | Operation | Before | After |
