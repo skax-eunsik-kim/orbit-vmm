@@ -169,7 +169,9 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
 - **testcontainers** mounts the socket path from `DOCKER_HOST`, which doesn't
   exist in the VM. Set
   `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`.
-- **Port forwarding:** UDP and `127.0.0.1:`-bound publishes aren't forwarded.
+- **Port forwarding:** UDP publishes aren't forwarded. Publishes on a specific
+  host IP (`-p 127.0.0.1:8080:80`) are forwarded to the Mac's `127.0.0.1` like
+  the rest; the same port published on two such IPs reaches only the newest.
   If two VMs publish the same port, the second one's forward fails (logged).
 - **Bind mounts:** no file locks are shared between the Mac and containers.
   Unix sockets and FIFOs can't be created on bind mounts.

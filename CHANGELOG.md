@@ -15,6 +15,10 @@ All notable changes are listed here. The format follows
 - `ORBIT_CPUS` defaults to the Mac's core count instead of 4. Idle vCPUs
   park, and with 4 vCPUs parallel container start-up queued on CPU.
 - Published ports are picked up every 250 ms instead of every second.
+- The VMM follows Docker's container events and forwards a `-p` publish as
+  soon as the container starts, including ports published on a specific host
+  IP (`-p 127.0.0.1:8080:80`), which were never forwarded before. The runc
+  wrapper that adds the Mac's CAs forks fewer processes (10 ms → 7 ms per create).
 - `memd` keeps the guest page cache under 1 GiB at all times
   (`orbit.memd_cache_mb`, 0 turns it off), not only once the VM goes idle.
   During a monorepo build the cache had grown to 7 GB and the VM to 15 GB on

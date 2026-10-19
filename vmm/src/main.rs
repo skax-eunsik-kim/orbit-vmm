@@ -53,7 +53,8 @@ fn virtio_devices(config: &Config, mem: &std::sync::Arc<memory::GuestMemory>) ->
         // Auto-publish guest ports when the guest control channel is available.
         if let Some(ctl) = config.vsock.iter().find(|v| v.guest_port == 1025) {
             let fixed = config.forwards.iter().map(|f| f.host_port).collect();
-            ports::spawn(ctl.path.clone(), net.port_control(), fixed);
+            let docker = config.vsock.iter().find(|v| v.guest_port == 2375).map(|v| v.path.clone());
+            ports::spawn(ctl.path.clone(), docker, net.port_control(), fixed);
             ports::spawn_time_sync(ctl.path.clone());
         }
         devices.push(Box::new(net));
