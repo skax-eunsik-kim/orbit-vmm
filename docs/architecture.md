@@ -93,10 +93,13 @@ with `ORBIT_MEMDUMP=<prefix>`, `touch <prefix>.req`, and match `<prefix>.bin`
   back in `stat`. Group/other permission bits mirror the owner bits, so
   non-root container users can write to your files.
 - Mac edits reach the guest as inotify events. `fsevents.rs` watches the
-  allowed directories with FSEvents and sends changed paths to
-  `fsnotify.sh` over vsock. The guest then does a same-size `truncate` under a
-  reserved gid, which raises `IN_MODIFY`. The server recognises that gid and
-  doesn't apply the truncate to the Mac file.
+  allowed directories with FSEvents; `forward_events` turns each batch into
+  edits, creations, renames and deletions (from the Mac's current state and
+  what the guest has looked up) and sends them to `fsnotify.sh` over vsock.
+  The guest repeats each change under a reserved gid: a same-size `truncate`
+  for an edit (`IN_MODIFY`), create/mkdir, rename or unlink/rmdir for the
+  rest. The server recognises that gid, never applies any of it to the Mac,
+  and lets it succeed only for paths it queued while the Mac still matches.
 
 ### Networking
 

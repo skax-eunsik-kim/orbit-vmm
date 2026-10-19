@@ -9,7 +9,7 @@ mod slirp;
 mod virtio;
 mod vm; // hvf bindings, GIC, vCPU loop, PSCI, FDT, PL011, boot
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Command line:
 ///   orbit-vmm --kernel <Image> [--initrd <cpio.gz>] [--mem <MiB>] [--cpus <n>]
@@ -70,8 +70,14 @@ fn virtio_devices(config: &Config, mem: &std::sync::Arc<memory::GuestMemory>) ->
         }
     }
     let notify = config.vsock.iter().find(|v| v.guest_port == 1026).map(|v| v.path.clone());
+    let reveal = docker_socket(config).and_then(|s| s.parent().map(Path::to_path_buf));
     for share in &config.shares {
-        let share = virtio::fs::Share { notify: notify.clone(), allow: config.share_allow.clone(), ..share.clone() };
+        let share = virtio::fs::Share {
+            notify: notify.clone(),
+            allow: config.share_allow.clone(),
+            reveal: reveal.clone(),
+            ..share.clone()
+        };
         match virtio::fs::Fs::new(share) {
             Ok(fs) => devices.push(Box::new(fs)),
             Err(e) => {
@@ -84,6 +90,16 @@ fn virtio_devices(config: &Config, mem: &std::sync::Arc<memory::GuestMemory>) ->
         devices.push(Box::new(virtio::balloon::Balloon::new()));
     }
     devices
+}
+
+/// The Mac-side docker socket (the vsock listener for the guest's dockerd).
+/// Clients that bind-mount DOCKER_HOST's path into a container (testcontainers'
+/// Ryuk) ask the daemon for exactly this path, so the guest's boot.sh puts a
+/// link to its own socket there (orbit.dockersock= on the kernel command line).
+fn docker_socket(config: &Config) -> Option<PathBuf> {
+    let s = &config.vsock.iter().find(|v| v.guest_port == 2375)?.path;
+    let s = s.parent()?.canonicalize().ok()?.join(s.file_name()?);
+    s.to_str().is_some_and(|t| !t.contains(char::is_whitespace)).then_some(s)
 }
 
 /// macOS starts processes with a soft limit of 256 fds; every file the guest
@@ -101,6 +117,9 @@ fn main() {
         std::process::exit(reclaim::selftest());
     }
     raise_fd_limit();
-    let config = vm::parse_args(std::env::args().skip(1));
+    let mut config = vm::parse_args(std::env::args().skip(1));
+    if let Some(s) = docker_socket(&config) {
+        config.cmdline.push_str(&format!(" orbit.dockersock={}", s.display()));
+    }
     std::process::exit(vm::run(config));
 }
