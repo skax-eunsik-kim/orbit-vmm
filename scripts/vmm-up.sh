@@ -7,7 +7,11 @@
 #      ORBIT_GUEST (kernel + initramfs directory, default ~/.orbit/guest),
 #      ORBIT_SHARE_ALLOW, ORBIT_HOST_LOOPBACK=0 (containers can't reach the Mac's
 #      127.0.0.1 services), ORBIT_INSTANCE (run more than one VM: each instance
-#      gets its own ~/.orbit/vmm-<name> with its own disk and sockets).
+#      gets its own ~/.orbit/vmm-<name> with its own disk and sockets),
+#      ORBIT_DISK (data disk image, default <instance dir>/data.img),
+#      ORBIT_DISK_WARN_MIB / ORBIT_DISK_FLOOR_MIB / ORBIT_DISK_PAUSE_SECS (see
+#      README "Data disk"), ORBIT_IGNORE_DISK_SPACE=1 (start even when the Mac's
+#      disk is nearly full).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ -x "$HERE/orbit-vmm" ]; then VMM="$HERE/orbit-vmm"; else VMM="$HERE/../vmm/target/release/orbit-vmm"; fi
@@ -16,7 +20,25 @@ D="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}"
 mkdir -p "$HOME/.orbit" "$D"
 chmod 700 "$HOME/.orbit" "$D"
 # Sparse: only what Docker actually stores takes space on the Mac.
-[ -f "$D/data.img" ] || mkfile -n "${ORBIT_DISK_GB:-64}g" "$D/data.img"
+IMG="${ORBIT_DISK:-$D/data.img}"
+[ -f "$IMG" ] || mkfile -n "${ORBIT_DISK_GB:-64}g" "$IMG"
+
+# The image grows as the guest writes; a full Mac disk stalls (and after
+# ORBIT_DISK_PAUSE_SECS corrupts) the VM, so don't start close to that.
+read -r total_k free_k < <(df -k "$IMG" | awk 'NR == 2 { print $2, $4 }')
+used_k=$(du -k "$IMG" | awk '{ print $1 }')
+size_k=$(( $(stat -f %z "$IMG") / 1024 ))
+warn_k=$(( ${ORBIT_DISK_WARN_MIB:-0} * 1024 ))
+if [ "$warn_k" = 0 ]; then
+  warn_k=$(( total_k / 50 )); [ $warn_k -gt 5242880 ] && warn_k=5242880
+  floor2_k=$(( ${ORBIT_DISK_FLOOR_MIB:-1024} * 2048 )); [ $warn_k -lt $floor2_k ] && warn_k=$floor2_k
+fi
+echo "data disk $IMG: $(( used_k >> 20 )).$(( (used_k * 10 >> 20) % 10 )) GiB used of $(( size_k >> 20 )) GiB; Mac disk has $(( free_k >> 20 )).$(( (free_k * 10 >> 20) % 10 )) GiB free"
+if [ "$free_k" -lt "$warn_k" ]; then
+  echo "the Mac's disk has only $(( free_k >> 10 )) MiB free (need $(( warn_k >> 10 )) MiB); the data disk can grow up to $(( (size_k - used_k) >> 20 )) GiB more." >&2
+  echo "free space on the Mac (or set ORBIT_IGNORE_DISK_SPACE=1)" >&2
+  [ "${ORBIT_IGNORE_DISK_SPACE:-0}" = 1 ] || exit 1
+fi
 
 # Ask a running VM to power off cleanly, and never start a second one on the same disk.
 if [ -S "$D/control.sock" ]; then echo shutdown | nc -U -w 3 "$D/control.sock" >/dev/null 2>&1; fi
@@ -56,13 +78,14 @@ for ((k = 0; k < ${#REAL[@]}; k++)); do
 done
 if [ ${#ALLOW[@]} -eq 0 ]; then echo "no shared directories (set ORBIT_SHARE_ALLOW)" >&2; exit 1; fi
 printf '%s\n' "${SHARES[@]}" > "$D/shares"
+printf '%s\n' "$IMG" > "$D/disk"
 
 NET_OPTS=()
 [ "${ORBIT_HOST_LOOPBACK:-1}" = 0 ] && NET_OPTS+=(--no-host-loopback)
 S="$D/docker.sock"
 G="${ORBIT_GUEST:-$HOME/.orbit/guest}"
 nohup "$VMM" --kernel "$G/kernel" --initrd "$G/initramfs" \
-  --mem "${ORBIT_MEM_MIB:-8192}" --cpus "${ORBIT_CPUS:-$(sysctl -n hw.ncpu)}" --net ${NET_OPTS[@]+"${NET_OPTS[@]}"} --balloon --disk "$D/data.img" \
+  --mem "${ORBIT_MEM_MIB:-8192}" --cpus "${ORBIT_CPUS:-$(sysctl -n hw.ncpu)}" --net ${NET_OPTS[@]+"${NET_OPTS[@]}"} --balloon --disk "$IMG" \
   --vsock "$S:2375" --vsock "$D/control.sock:1025" --vsock "$D/fsnotify.sock:1026" --share "/Users:users" "${ALLOW[@]}" \
   --cmdline "console=ttyAMA0 panic=-1 page_reporting.page_reporting_order=2 orbit.time=$(date +%s)" \
   > "$D/console.log" 2>&1 < /dev/null &
