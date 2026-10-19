@@ -15,6 +15,17 @@ All notable changes are listed here. The format follows
   `healthcheck.py` checks free space and no longer counts informational
   `orbit-vmm:` lines as errors.
 
+- Files and directories created, renamed or deleted on the Mac now raise
+  `IN_CREATE`, `IN_MOVED_FROM`/`IN_MOVED_TO` and `IN_DELETE` in containers,
+  including files inside new subdirectories, so hot reload survives
+  `git checkout` and code generators. The guest agent repeats the change
+  itself under the reserved gid; the VMM answers those requests without
+  touching the Mac, and only for paths it queued while the Mac still matches.
+- testcontainers works without `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`. The
+  VMM shows the docker socket's directory (`~/.orbit/vmm/`) to the guest as
+  an empty, read-only mount point, and the guest links `docker.sock` there to
+  its own socket, so Ryuk's bind mount of the `DOCKER_HOST` path works.
+
 ### Performance
 
 - The guest installs Docker 29.5 (Alpine v3.23) instead of 29.8 (v3.24).
@@ -50,19 +61,6 @@ All notable changes are listed here. The format follows
   constantly still stays resident. `ORBIT_PRESSURE=off` turns it off.
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
-
-### Fixed
-
-- Files and directories created, renamed or deleted on the Mac now raise
-  `IN_CREATE`, `IN_MOVED_FROM`/`IN_MOVED_TO` and `IN_DELETE` in containers,
-  including files inside new subdirectories, so hot reload survives
-  `git checkout` and code generators. The guest agent repeats the change
-  itself under the reserved gid; the VMM answers those requests without
-  touching the Mac, and only for paths it queued while the Mac still matches.
-- testcontainers works without `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`. The
-  VMM shows the docker socket's directory (`~/.orbit/vmm/`) to the guest as
-  an empty, read-only mount point, and the guest links `docker.sock` there to
-  its own socket, so Ryuk's bind mount of the `DOCKER_HOST` path works.
 
 ### Security
 
