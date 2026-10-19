@@ -87,6 +87,10 @@ checkout outside your shared directories.
 | `ORBIT_CPUS` | Mac core count (`sysctl -n hw.ncpu`) | vCPUs. Idle vCPUs park and cost no CPU; with only a few, parallel container start-up (e.g. agent sandboxes) queues on CPU. |
 | `ORBIT_GUEST` | `~/.orbit/guest` | Directory with the guest `kernel` and `initramfs` (e.g. one built with `ORBIT_HOME=… scripts/fetch-guest.sh`). |
 | `ORBIT_DISK_GB` | `64` | Size of a **new** data disk (sparse file). |
+| `ORBIT_DISK` | `<instance dir>/data.img` | Data disk image to use. |
+| `ORBIT_DISK_WARN_MIB` | 5 GiB or 2% of the Mac's disk, whichever is smaller | Below this much free space on the Mac, the VMM warns in `console.log` and `vmm-up.sh` refuses to start (`ORBIT_IGNORE_DISK_SPACE=1` starts anyway). |
+| `ORBIT_DISK_FLOOR_MIB` | `1024` | Below this, guest disk writes are held until space is freed (see [Data disk](#data-disk)). |
+| `ORBIT_DISK_PAUSE_SECS` | `600` | How long a held write waits before it fails. |
 | `ORBIT_SHARE_ALLOW` | see below | Colon-separated directories that containers may bind-mount. |
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
 | `ORBIT_INSTANCE` | (unset) | Run a separate VM with its own disk and sockets under `~/.orbit/vmm-<name>`. |
@@ -141,6 +145,28 @@ The guest resizes its filesystem on boot:
 ```bash
 python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(p,max(os.path.getsize(p),128<<30))"
 ```
+
+### Data disk
+
+`data.img` is sparse: it takes as much space on the Mac as Docker has
+written, up to its logical size (`vmm-up.sh` prints both). It grows silently,
+so the VMM checks the Mac's free space every 5 seconds:
+
+- Below `ORBIT_DISK_WARN_MIB`, it logs `orbit-vmm: disk space low` to
+  `console.log` (again every 10 minutes while it stays low), and
+  `scripts/healthcheck.py` reports a warning.
+- Below `ORBIT_DISK_FLOOR_MIB`, or when a write fails because the disk is
+  full, it holds guest disk writes and logs `orbit-vmm: DISK FULL` once.
+  Docker stalls (the guest may log hung-task warnings), but nothing fails.
+  Free space on the Mac and writes resume where they stopped
+  (`disk writes resumed`).
+- If no space is freed within `ORBIT_DISK_PAUSE_SECS`, writes fail. ext4 then
+  reports I/O errors and may go read-only, so free space before that and
+  restart the VM if it did.
+
+Holding writes instead of failing them is what QEMU does by default
+(`werror=enospc`): a failed write is data ext4 has already promised to store,
+and losing it is how a full Mac disk corrupts the guest.
 
 ## Upgrading
 

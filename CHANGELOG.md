@@ -5,6 +5,16 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A full Mac disk no longer corrupts the guest. The VMM warns in
+  `console.log` when the Mac's free space drops below 5 GiB (or 2%), holds
+  guest disk writes below 1 GiB or on ENOSPC (for up to 10 minutes) instead
+  of failing them, and resumes once space is freed. `vmm-up.sh` refuses to
+  start that low and prints the data disk's real and logical size;
+  `healthcheck.py` checks free space and no longer counts informational
+  `orbit-vmm:` lines as errors.
+
 ### Performance
 
 - The guest installs Docker 29.5 (Alpine v3.23) instead of 29.8 (v3.24).

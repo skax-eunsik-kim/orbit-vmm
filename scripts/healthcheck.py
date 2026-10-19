@@ -3,8 +3,9 @@
 
 Each run exercises the things developers rely on (Docker answers, containers
 start, published ports reach the Mac, bind-mount edits and inotify events
-arrive, the guest clock is right) and records VMM resource use (memory, threads,
-fds, disk) to <instance dir>/health.jsonl.
+arrive, the guest clock is right, the Mac's disk has room for the data disk)
+and records VMM resource use (memory, threads, fds, disk) to
+<instance dir>/health.jsonl.
 
 Adaptive schedule: the job may be invoked often (launchd every 15 min); it only
 does work when due. Interval starts at 1 h, doubles to 2 h and then 4 h after 3
@@ -32,7 +33,25 @@ STREAK_TO_GROW = 3
 # was started with (vmm-up.sh records them in <instance dir>/shares).
 SCRATCH = ".orbit-health"
 MAX_REPLY = 64 << 10
+MIB = 1 << 20
+# Same defaults as the VMM (vmm/src/virtio/blk.rs): it warns below WARN and
+# holds guest writes below FLOOR.
+DISK_FLOOR = int(os.environ.get("ORBIT_DISK_FLOOR_MIB", 1024)) * MIB
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def disk_image(inst_dir):
+    try:
+        with open(f"{inst_dir}/disk") as f:
+            return f.readline().strip() or f"{inst_dir}/data.img"
+    except OSError:
+        return f"{inst_dir}/data.img"
+
+
+def disk_warn(total):
+    if os.environ.get("ORBIT_DISK_WARN_MIB"):
+        return int(os.environ["ORBIT_DISK_WARN_MIB"]) * MIB
+    return max(min(5 << 30, total // 50), 2 * DISK_FLOOR)
 
 
 def shared_parent(inst_dir):
@@ -222,6 +241,18 @@ class Run:
         self.metrics["clock_offset_ms"] = round(offset * 1000)
         return abs(offset) < 1.0, f"{offset * 1000:+.0f} ms"
 
+    def disk_free(self):
+        img = disk_image(self.dir)
+        st = os.statvfs(os.path.dirname(os.path.abspath(img)))
+        free, total = st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
+        self.metrics["mac_disk_free_mib"] = free // MIB
+        detail = f"{free // MIB} MiB free on the Mac's disk"
+        if free < DISK_FLOOR:
+            return False, detail + f" (below {DISK_FLOOR // MIB} MiB: guest writes are held)"
+        if free < disk_warn(total):
+            self.disk_low = detail
+        return True, detail
+
     # ---- resource metrics ----------------------------------------------------
 
     def collect(self):
@@ -237,7 +268,7 @@ class Run:
             self.metrics["threads"] = max(0, len(out.splitlines()) - 1)
             rc, out = sh(["lsof", "-p", str(pid)], timeout=20)
             self.metrics["fds"] = max(0, len(out.splitlines()) - 1)
-        img = f"{self.dir}/data.img"
+        img = disk_image(self.dir)
         if os.path.exists(img):
             st = os.stat(img)
             self.metrics["disk_used_mib"] = st.st_blocks * 512 // (1 << 20)
@@ -260,8 +291,12 @@ def console_errors(inst_dir, state):
         f.seek(start)
         new = f.read().decode(errors="replace")
     state["console_offset"] = size
-    bad = ("panic", "Kernel panic", "Oops", "BUG:", "Out of memory", "EXT4-fs error", "orbit-vmm: ", "segfault")
-    return [l.strip()[:160] for l in new.splitlines() if any(b in l for b in bad) and "clock was off" not in l and "Kernel command line" not in l][:20]
+    # Not bare "panic" (the kernel command line has panic=-1) or every
+    # "orbit-vmm: " line (most are informational: forwarding, balloon, clock).
+    bad = ("Kernel panic", "panicked at", "Oops", "BUG:", "Out of memory", "EXT4-fs error", "EXT4-fs warning",
+           "potential data loss", "I/O error", "Read-only file system", "segfault",
+           "orbit-vmm: DISK FULL", "orbit-vmm: disk space low", "orbit-vmm: disk write failed", "orbit-vmm: disk flush failed")
+    return [l.strip()[:160] for l in new.splitlines() if any(b in l for b in bad)][:20]
 
 
 def main():
@@ -290,6 +325,7 @@ def main():
         r.check("port_publish", r.port_publish)
         r.check("bind_edit_inotify", r.bind_edit_and_inotify)
         r.check("clock", r.clock)
+    r.check("disk_free", r.disk_free)
     r.collect()
     errors = console_errors(inst_dir, state)
 
@@ -302,6 +338,8 @@ def main():
         base.setdefault(k, v)
         if v > 2 * base[k] + slack:
             warnings.append(f"{k} {v} vs baseline {base[k]}")
+    if getattr(r, "disk_low", None):
+        warnings.append(f"disk space low: {r.disk_low}")
     if errors:
         warnings.append(f"{len(errors)} new error line(s) in console.log")
 
