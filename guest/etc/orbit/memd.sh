@@ -15,13 +15,19 @@
 #    until it finished. The cache is redundant anyway: the Mac caches data.img
 #    itself. Reclaim goes through the root cgroup's memory.reclaim, which
 #    takes the coldest pages first.
+#  - macOS memory pressure (the VMM writes /run/orbit-pressure through
+#    control.sh): the cap drops to WARN_MB on warn and CRIT_MB on critical,
+#    so the Mac compresses less guest RAM; `memd.sh reclaim <level>` (run by
+#    control.sh on a change) reclaims to the new cap and compacts at once,
+#    dropping the dentry/inode caches too on critical.
 #
 # Tunables (kernel command line): orbit.memd_idle=<s> (30), orbit.memd_quiet=<s>
 # (60), orbit.memd_min_mb=<MiB> (128: leave caches smaller than this alone),
 # orbit.memd_cache_mb=<MiB> (1024; 0 turns the cap off), orbit.memd_trim=<s>
-# (600: fstrim /data this often when quiet; 0 turns it off).
+# (600: fstrim /data this often when quiet; 0 turns it off),
+# orbit.memd_warn_mb=<MiB> (256), orbit.memd_crit_mb=<MiB> (64).
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-IDLE_S=30; QUIET_S=60; MIN_MB=128; CACHE_MB=1024; TRIM_S=600
+IDLE_S=30; QUIET_S=60; MIN_MB=128; CACHE_MB=1024; TRIM_S=600; WARN_MB=256; CRIT_MB=64
 for arg in $(cat /proc/cmdline); do
   case "$arg" in
     orbit.memd_idle=*) IDLE_S=${arg#orbit.memd_idle=} ;;
@@ -29,19 +35,42 @@ for arg in $(cat /proc/cmdline); do
     orbit.memd_min_mb=*) MIN_MB=${arg#orbit.memd_min_mb=} ;;
     orbit.memd_cache_mb=*) CACHE_MB=${arg#orbit.memd_cache_mb=} ;;
     orbit.memd_trim=*) TRIM_S=${arg#orbit.memd_trim=} ;;
+    orbit.memd_warn_mb=*) WARN_MB=${arg#orbit.memd_warn_mb=} ;;
+    orbit.memd_crit_mb=*) CRIT_MB=${arg#orbit.memd_crit_mb=} ;;
   esac
 done
 case "$CACHE_MB" in '' | *[!0-9]*) CACHE_MB=1024 ;; esac
 case "$TRIM_S" in '' | *[!0-9]*) TRIM_S=600 ;; esac
+case "$WARN_MB" in '' | *[!0-9]*) WARN_MB=256 ;; esac
+case "$CRIT_MB" in '' | *[!0-9]*) CRIT_MB=64 ;; esac
 INTERVAL=5
-# Defragment in the background too, so free memory stays reportable.
-sysctl -qw vm.compaction_proactiveness=50 2>/dev/null
 
 cpu() { awk '/^cpu /{print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6}' /proc/stat; }
 io() { awk '/^(pgpgin|pgpgout) /{s+=$2} END{print s}' /proc/vmstat; }
 # Reclaimable page cache: tmpfs shows up as Cached too but can't be dropped.
 cached_mb() { awk '/^Cached:/{c=$2} /^Shmem:/{s=$2} END{print int((c-s)/1024)}' /proc/meminfo; }
 log() { echo "[memd] $*" > /dev/hvc0; }
+# Page-cache cap in MiB for the current macOS pressure level (0 = no cap).
+cap_mb() {
+  case "$(cat /run/orbit-pressure 2>/dev/null)" in
+    critical) echo "$CRIT_MB" ;;
+    warn) echo $((CACHE_MB > 0 && CACHE_MB < WARN_MB ? CACHE_MB : WARN_MB)) ;;
+    *) echo "$CACHE_MB" ;;
+  esac
+}
+
+if [ "$1" = reclaim ]; then
+  before=$(cached_mb); cap=$(cap_mb)
+  [ "$2" = critical ] && sync && echo 3 > /proc/sys/vm/drop_caches
+  c=$(cached_mb)
+  [ "$cap" -gt 0 ] && [ "$c" -gt "$cap" ] && echo "$((c - cap))M" > /sys/fs/cgroup/memory.reclaim 2>/dev/null
+  echo 1 > /proc/sys/vm/compact_memory
+  log "macOS memory pressure $2: page cache cap $cap MiB, ${before} -> $(cached_mb) MiB"
+  exit 0
+fi
+
+# Defragment in the background too, so free memory stays reportable.
+sysctl -qw vm.compaction_proactiveness=50 2>/dev/null
 
 set -- $(cpu); last_total=$1; last_idle=$2
 last_io=$(io)
@@ -57,16 +86,17 @@ while sleep $INTERVAL; do
   if [ $pct -ge 95 ] && [ $dio -lt $((1024 * INTERVAL)) ]; then idle_for=$((idle_for + INTERVAL)); else idle_for=0; trimmed=0; fi
 
   # Cap with 25% slack so a cache hovering at the limit isn't reclaimed every tick.
-  if [ "$CACHE_MB" -gt 0 ]; then
+  cap=$(cap_mb)
+  if [ "$cap" -gt 0 ]; then
     c=$(cached_mb)
-    if [ "$c" -gt $((CACHE_MB + CACHE_MB / 4)) ]; then
-      echo "$((c - CACHE_MB))M" > /sys/fs/cgroup/memory.reclaim 2>/dev/null
-      capped=$((${capped:-0} + c - CACHE_MB))
+    if [ "$c" -gt $((cap + cap / 4)) ]; then
+      echo "$((c - cap))M" > /sys/fs/cgroup/memory.reclaim 2>/dev/null
+      capped=$((${capped:-0} + c - cap))
     fi
     # One summary line a minute at most, not one per tick.
     tick=$((${tick:-0} + 1))
     if [ $((tick % 12)) -eq 0 ] && [ "${capped:-0}" -gt 0 ]; then
-      log "cap ${CACHE_MB} MiB: reclaimed ~${capped} MiB of page cache in the last minute (now $(cached_mb) MiB)"
+      log "cap ${cap} MiB: reclaimed ~${capped} MiB of page cache in the last minute (now $(cached_mb) MiB)"
       capped=0
     fi
   fi

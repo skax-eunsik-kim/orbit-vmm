@@ -3,6 +3,7 @@ mod fsevents;
 mod memdump;
 mod memory;
 mod ports;
+mod pressure;
 mod reclaim;
 mod slirp;
 mod virtio;

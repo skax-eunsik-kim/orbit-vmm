@@ -26,6 +26,14 @@ All notable changes are listed here. The format follows
   quiet (`orbit.memd_trim`, 0 turns it off). Space Docker frees (pruned
   images, build cache) now goes back to the Mac: a 35 GB image with 13 GB of
   pruned build cache shrank to 16 GB, and the data stayed intact.
+- The VMM passes macOS memory pressure on to the guest (`pressure.rs`,
+  `pressure <level>` on the control vsock). On warn `memd` caps the page
+  cache at 256 MiB instead of 1 GiB, on critical at 64 MiB after dropping all
+  clean caches, and reclaims right away, so macOS has less guest RAM to
+  compress. With the Mac at warn, 30 s after writing and reading a 2 GB file
+  the VM took 911 MB on the Mac instead of 1866 MB (1579 MiB of it
+  compressed or swapped, now 481 MiB). A working set that is re-read
+  constantly still stays resident. `ORBIT_PRESSURE=off` turns it off.
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
 

@@ -53,6 +53,20 @@ Linux holds on to file data as page cache, which the balloon can't report.
 - Both times, it compacts memory so the freed pages form reportable blocks.
 - At all times, it keeps the page cache under 1 GiB through the root cgroup's
   `memory.reclaim` (builds are never idle; the Mac caches `data.img` anyway).
+- While macOS reports memory pressure, it keeps the page cache under 256 MiB
+  (warn) or 64 MiB (critical) instead (`orbit.memd_warn_mb`,
+  `orbit.memd_crit_mb`).
+
+`pressure.rs` watches macOS memory pressure (a libdispatch memory-pressure
+source, plus `kern.memorystatus_vm_pressure_level` re-read every 30 s) and
+sends `pressure normal|warn|critical` on the control vsock. On a change,
+`control.sh` records the level in `/run/orbit-pressure` and runs
+`memd.sh reclaim <level>` right away: reclaim to the new cap (on critical,
+drop all clean caches first) and compact, so free page reporting hands the
+pages back before macOS has to compress them. `ORBIT_PRESSURE=off` turns it
+off, and `ORBIT_PRESSURE=warn|critical` pins the level, for comparisons. It
+helps with cache the guest touched once (a build's inputs, a pulled image);
+a working set the guest keeps re-reading stays resident whatever the cap.
 
 Activity Monitor's Memory column is the process's `phys_footprint`. When the
 Mac is short on memory, macOS compresses or swaps part of guest RAM, and the
