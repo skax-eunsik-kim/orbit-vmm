@@ -50,6 +50,17 @@ io() { awk '/^(pgpgin|pgpgout) /{s+=$2} END{print s}' /proc/vmstat; }
 # Reclaimable page cache: tmpfs shows up as Cached too but can't be dropped.
 cached_mb() { awk '/^Cached:/{c=$2} /^Shmem:/{s=$2} END{print int((c-s)/1024)}' /proc/meminfo; }
 log() { echo "[memd] $*" > /dev/hvc0; }
+# Reclaim only page cache from a cgroup. Without swappiness=0, memory.reclaim
+# also swaps running services' memory out to zram (0.8 GB at a c2 stack's
+# start), which costs CPU and slows them down when they touch it again.
+# Older kernels reject the argument (EINVAL); decide once, because a failed
+# write also just means "couldn't reclaim that much" and must not be retried
+# in the swapping form.
+SWAP0=" swappiness=0"
+case "$( { echo "1M$SWAP0" > /sys/fs/cgroup/memory.reclaim; } 2>&1)" in *nvalid*) SWAP0="" ;; esac
+reclaim_file() { # reclaim_file <cgroup dir> <MiB>
+  echo "$2M$SWAP0" > "$1/memory.reclaim" 2>/dev/null
+}
 # Page-cache cap in MiB for the current macOS pressure level (0 = no cap).
 cap_mb() {
   case "$(cat /run/orbit-pressure 2>/dev/null)" in
@@ -63,7 +74,7 @@ if [ "$1" = reclaim ]; then
   before=$(cached_mb); cap=$(cap_mb)
   [ "$2" = critical ] && sync && echo 3 > /proc/sys/vm/drop_caches
   c=$(cached_mb)
-  [ "$cap" -gt 0 ] && [ "$c" -gt "$cap" ] && echo "$((c - cap))M" > /sys/fs/cgroup/memory.reclaim 2>/dev/null
+  [ "$cap" -gt 0 ] && [ "$c" -gt "$cap" ] && reclaim_file /sys/fs/cgroup $((c - cap))
   echo 1 > /proc/sys/vm/compact_memory
   log "macOS memory pressure $2: page cache cap $cap MiB, ${before} -> $(cached_mb) MiB"
   exit 0
@@ -90,7 +101,7 @@ while sleep $INTERVAL; do
   if [ "$cap" -gt 0 ]; then
     c=$(cached_mb)
     if [ "$c" -gt $((cap + cap / 4)) ]; then
-      echo "$((c - cap))M" > /sys/fs/cgroup/memory.reclaim 2>/dev/null
+      reclaim_file /sys/fs/cgroup $((c - cap))
       capped=$((${capped:-0} + c - cap))
     fi
     # One summary line a minute at most, not one per tick.
@@ -127,7 +138,7 @@ while sleep $INTERVAL; do
     [ -w $cg/memory.reclaim ] || continue
     file_mb=$(awk '/^file /{print int($2/1048576)}' $cg/memory.stat)
     [ "${file_mb:-0}" -ge "$MIN_MB" ] || continue
-    echo "$((file_mb / 2))M" > $cg/memory.reclaim 2>/dev/null
+    reclaim_file $cg $((file_mb / 2))
     echo 1 > /proc/sys/vm/compact_memory
     log "quiet: containers' page cache ${file_mb} -> $(awk '/^file /{print int($2/1048576)}' $cg/memory.stat) MiB"
   fi
