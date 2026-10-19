@@ -52,11 +52,13 @@ const SINCE_NOW: u64 = u64::MAX;
 const FLAG_NO_DEFER: u32 = 0x02;
 const FLAG_FILE_EVENTS: u32 = 0x10;
 
-pub const ITEM_IS_FILE: u32 = 0x10000;
+pub const ITEM_IS_DIR: u32 = 0x20000;
 pub const ITEM_INODE_META_MOD: u32 = 0x400;
 pub const ITEM_CREATED: u32 = 0x100;
 pub const ITEM_MODIFIED: u32 = 0x1000;
 pub const ITEM_RENAMED: u32 = 0x800;
+#[cfg(test)]
+pub const ITEM_REMOVED: u32 = 0x200;
 
 extern "C" fn on_events(
     _stream: *const c_void,
@@ -64,19 +66,22 @@ extern "C" fn on_events(
     n: usize,
     paths: *const *const c_char,
     flags: *const u32,
-    _ids: *const u64,
+    ids: *const u64,
 ) {
-    let tx = unsafe { &*(info as *const Sender<(PathBuf, u32)>) };
+    let tx = unsafe { &*(info as *const Sender<Event>) };
     for i in 0..n {
         let path = unsafe { CStr::from_ptr(*paths.add(i)) };
-        let flag = unsafe { *flags.add(i) };
-        let _ = tx.send((PathBuf::from(path.to_string_lossy().into_owned()), flag));
+        let (flag, id) = unsafe { (*flags.add(i), *ids.add(i)) };
+        let _ = tx.send((PathBuf::from(path.to_string_lossy().into_owned()), flag, id));
     }
 }
 
-/// Starts watching `root` recursively; events arrive as (path, FSEvents flags).
-/// The stream lives for the rest of the process.
-pub fn watch(root: &Path, tx: Sender<(PathBuf, u32)>) -> Result<(), String> {
+/// (path, FSEvents flags, event id). The two halves of a rename arrive as
+/// consecutive ids: the old name first, then the new one.
+pub type Event = (PathBuf, u32, u64);
+
+/// Starts watching `root` recursively. The stream lives for the rest of the process.
+pub fn watch(root: &Path, tx: Sender<Event>) -> Result<(), String> {
     let c_root = CString::new(root.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
     let info = Box::into_raw(Box::new(tx)) as *mut c_void;
     unsafe {

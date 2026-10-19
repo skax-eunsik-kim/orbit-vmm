@@ -17,6 +17,16 @@ case "$cmd" in
   # Sent by the VMM exactly on a host second boundary, only after "now" showed
   # a real offset. busybox date only sets whole seconds, which is why.
   time\ *) date -s "@${cmd#time }" >/dev/null && echo ok ;;
+  # macOS memory pressure (normal|warn|critical), sent by the VMM when it
+  # changes and every 30 s while it lasts. memd keeps the page cache under a
+  # lower cap meanwhile; on a change, also give memory back right away
+  # (detached, so the reply isn't held up).
+  pressure\ normal | pressure\ warn | pressure\ critical)
+    level=${cmd#pressure }
+    old=$(cat /run/orbit-pressure 2>/dev/null || echo normal)
+    if [ "$level" = normal ]; then rm -f /run/orbit-pressure; else echo "$level" > /run/orbit-pressure; fi
+    [ "$level" = "$old" ] || setsid /etc/orbit/memd.sh reclaim "$level" </dev/null >/dev/null 2>&1 &
+    echo ok ;;
   meminfo) awk '/^(MemTotal|MemAvailable):/{print $1, $2}' /proc/meminfo ;;
   shutdown) echo ok; poweroff ;;
   *) echo "unknown: $cmd" ;;

@@ -16,6 +16,27 @@ All notable changes are listed here. The format follows
   - Below `ORBIT_STOP_FREE_GB` (3) the guest shuts down cleanly and stays
     down. A full Mac disk corrupted a guest's ext4 in testing.
   - The VM doesn't start below that threshold either.
+- Disk guard in the VMM, a last resort under the supervisor's: on ENOSPC or
+  below `ORBIT_DISK_FLOOR_MIB` (1 GiB) free it holds guest disk writes (for up
+  to 10 minutes) instead of failing them, and resumes once space is freed, so
+  ext4 never sees write errors. It logs to `console.log` at the supervisor's
+  warning level (`ORBIT_WARN_FREE_GB`). `vmm-up.sh` prints the data disk's
+  real and logical size.
+
+### Fixed
+
+- `healthcheck.py` checks free space and no longer counts informational
+  `orbit-vmm:` lines as errors.
+- Files and directories created, renamed or deleted on the Mac now raise
+  `IN_CREATE`, `IN_MOVED_FROM`/`IN_MOVED_TO` and `IN_DELETE` in containers,
+  including files inside new subdirectories, so hot reload survives
+  `git checkout` and code generators. The guest agent repeats the change
+  itself under the reserved gid; the VMM answers those requests without
+  touching the Mac, and only for paths it queued while the Mac still matches.
+- testcontainers works without `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`. The
+  VMM shows the docker socket's directory (`~/.orbit/vmm/`) to the guest as
+  an empty, read-only mount point, and the guest links `docker.sock` there to
+  its own socket, so Ryuk's bind mount of the `DOCKER_HOST` path works.
 
 ### Performance
 
@@ -46,6 +67,10 @@ A metadata-heavy bind-mount workload is 10–20x faster:
 - `ORBIT_CPUS` defaults to the Mac's core count instead of 4. Idle vCPUs
   park, and with 4 vCPUs parallel container start-up queued on CPU.
 - Published ports are picked up every 250 ms instead of every second.
+- The VMM follows Docker's container events and forwards a `-p` publish as
+  soon as the container starts, including ports published on a specific host
+  IP (`-p 127.0.0.1:8080:80`), which were never forwarded before. The runc
+  wrapper that adds the Mac's CAs forks fewer processes (10 ms → 7 ms per create).
 - `memd` keeps the guest page cache under 1 GiB at all times
   (`orbit.memd_cache_mb`, 0 turns it off), not only once the VM goes idle.
   During a monorepo build the cache had grown to 7 GB and the VM to 15 GB on
@@ -57,6 +82,14 @@ A metadata-heavy bind-mount workload is 10–20x faster:
   quiet (`orbit.memd_trim`, 0 turns it off). Space Docker frees (pruned
   images, build cache) now goes back to the Mac: a 35 GB image with 13 GB of
   pruned build cache shrank to 16 GB, and the data stayed intact.
+- The VMM passes macOS memory pressure on to the guest (`pressure.rs`,
+  `pressure <level>` on the control vsock). On warn `memd` caps the page
+  cache at 256 MiB instead of 1 GiB, on critical at 64 MiB after dropping all
+  clean caches, and reclaims right away, so macOS has less guest RAM to
+  compress. With the Mac at warn, 30 s after writing and reading a 2 GB file
+  the VM took 911 MB on the Mac instead of 1866 MB (1579 MiB of it
+  compressed or swapped, now 481 MiB). A working set that is re-read
+  constantly still stays resident. `ORBIT_PRESSURE=off` turns it off.
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
 

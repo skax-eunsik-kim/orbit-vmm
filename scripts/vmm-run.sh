@@ -47,6 +47,9 @@ echo $$ > "$D/run.pid"
 free_gb() { df -k "$D" | awk 'NR == 2 { print int($4 / 1048576) }'; }
 WARN_GB=${ORBIT_WARN_FREE_GB:-10}
 STOP_GB=${ORBIT_STOP_FREE_GB:-3}
+# The VMM's own guard logs at the same level we notify at, and holds guest
+# writes below ORBIT_DISK_FLOOR_MIB (1 GiB), a last resort under STOP_GB.
+export ORBIT_DISK_WARN_MIB=${ORBIT_DISK_WARN_MIB:-$(( WARN_GB * 1024 ))}
 [ "$(free_gb)" -ge "$STOP_GB" ] || fail "only $(free_gb) GB free on the Mac disk (need ${STOP_GB}+)"
 
 # Crash-loop guard. A start requested by vmm-up.sh resets the count.

@@ -62,6 +62,7 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Config {
                         tag: tag.into(),
                         notify: None,
                         allow: Vec::new(),
+                        reveal: None,
                     }),
                     _ => die(&format!("bad --share {spec}, want DIR:TAG")),
                 }
@@ -125,6 +126,7 @@ fn setup_and_run(config: Config) -> Result<i32, String> {
         .map_err(|e| e.to_string())?;
     let mem = Arc::new(unsafe { GuestMemory::from_raw(host as *mut u8, mem_size) });
     crate::memdump::spawn(mem.clone());
+    crate::pressure::spawn(&config);
 
     let gic = gic::create().map_err(|e| e.to_string())?;
     let kicker = Arc::new(vcpu::Kicker::new());

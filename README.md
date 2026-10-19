@@ -27,8 +27,9 @@ memory, so freed memory can actually be returned.
   ([benchmarks](docs/benchmarks.md)).
 - **Bind mounts over virtio-fs.** `-v $PWD:/app` works at the same path as on
   the Mac. It has multiple request queues, attribute caching and readdirplus.
-  Mac edits fire inotify events in containers, so `uvicorn --reload`, vite and
-  nodemon hot reload works. `chown` and `chmod` inside a container work too.
+  Mac edits, new files and directories, renames and deletions fire inotify
+  events in containers, so `uvicorn --reload`, vite and nodemon hot reload
+  keeps working through `git checkout` and code generators. `chown` and `chmod` inside a container work too.
   Both are emulated with xattrs. The real file stays yours and never becomes
   setuid or group- or world-writable on the Mac.
 - **Opt-in sharing.** Only allowed directories are visible to the VM, and
@@ -87,6 +88,9 @@ checkout outside your shared directories.
 | `ORBIT_CPUS` | Mac core count (`sysctl -n hw.ncpu`) | vCPUs. Idle vCPUs park and cost no CPU; with only a few, parallel container start-up (e.g. agent sandboxes) queues on CPU. |
 | `ORBIT_GUEST` | `~/.orbit/guest` | Directory with the guest `kernel` and `initramfs` (e.g. one built with `ORBIT_HOME=… scripts/fetch-guest.sh`). |
 | `ORBIT_DISK_GB` | `64` | Size of a **new** data disk (sparse file). |
+| `ORBIT_DISK_WARN_MIB` | `ORBIT_WARN_FREE_GB` in MiB | Below this much free space on the Mac, the VMM also warns in `console.log`. |
+| `ORBIT_DISK_FLOOR_MIB` | `1024` | Last resort under `ORBIT_STOP_FREE_GB`: below this, guest disk writes are held until space is freed (see [Data disk](#data-disk)). |
+| `ORBIT_DISK_PAUSE_SECS` | `600` | How long a held write waits before it fails. |
 | `ORBIT_SHARE_ALLOW` | see below | Colon-separated directories that containers may bind-mount. |
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac disk free space at which the VM warns you, and at which it shuts down cleanly before its disk fills. |
@@ -145,6 +149,31 @@ The guest resizes its filesystem on boot:
 python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(p,max(os.path.getsize(p),128<<30))"
 ```
 
+### Data disk
+
+`data.img` is sparse: it takes as much space on the Mac as Docker has
+written, up to its logical size (`vmm-up.sh` prints both). It grows silently,
+so two guards watch the Mac's free space. The supervisor (`vmm-run.sh`)
+notifies you below `ORBIT_WARN_FREE_GB`, and shuts the guest down cleanly below
+`ORBIT_STOP_FREE_GB` (it won't start there either). Under that, as a last
+resort, the VMM checks every 5 seconds:
+
+- Below `ORBIT_DISK_WARN_MIB`, it logs `orbit-vmm: disk space low` to
+  `console.log` (again every 10 minutes while it stays low), and
+  `scripts/healthcheck.py` reports a warning.
+- Below `ORBIT_DISK_FLOOR_MIB`, or when a write fails because the disk is
+  full, it holds guest disk writes and logs `orbit-vmm: DISK FULL` once.
+  Docker stalls (the guest may log hung-task warnings), but nothing fails.
+  Free space on the Mac and writes resume where they stopped
+  (`disk writes resumed`).
+- If no space is freed within `ORBIT_DISK_PAUSE_SECS`, writes fail. ext4 then
+  reports I/O errors and may go read-only, so free space before that and
+  restart the VM if it did.
+
+Holding writes instead of failing them is what QEMU does by default
+(`werror=enospc`): a failed write is data ext4 has already promised to store,
+and losing it is how a full Mac disk corrupts the guest.
+
 ## Upgrading
 
 ```bash
@@ -195,13 +224,14 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
 
 ## Known limitations
 
-- **inotify:** deletions, and files inside *newly created* directories, don't
-  raise inotify events. Restart the watcher, or create the directory from
-  inside the container.
-- **testcontainers** mounts the socket path from `DOCKER_HOST`, which doesn't
-  exist in the VM. Set
-  `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`.
-- **Port forwarding:** UDP and `127.0.0.1:`-bound publishes aren't forwarded.
+- **inotify:** Mac-side changes reach containers about a second later. A new
+  directory tree with more than 256 entries (a fresh worktree, an
+  `npm install` on the Mac) raises one `IN_CREATE` for its top directory;
+  recursive watchers scan it from there. Renames pair up only when the guest
+  had already seen the old name; otherwise they show up as delete + create.
+- **Port forwarding:** UDP publishes aren't forwarded. Publishes on a specific
+  host IP (`-p 127.0.0.1:8080:80`) are forwarded to the Mac's `127.0.0.1` like
+  the rest; the same port published on two such IPs reaches only the newest.
   If two VMs publish the same port, the second one's forward fails (logged).
 - **Bind mounts:** no file locks are shared between the Mac and containers.
   Unix sockets and FIFOs can't be created on bind mounts.

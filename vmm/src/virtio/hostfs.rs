@@ -11,6 +11,8 @@
 //! An optional allowlist narrows the share further: only paths under an
 //! allowed directory are visible; their ancestors can be traversed (and list
 //! only the entries leading to an allowed directory) but not modified.
+//! A revealed directory (`Root::reveal`) is visible the same way, but empty:
+//! the guest mounts its own files over it.
 
 use std::ffi::{c_char, c_int, c_uint, CString, OsStr};
 use std::fs::File;
@@ -191,6 +193,8 @@ pub struct Root {
     /// Entries live DIR_CACHE_TTL, so a directory moved on the Mac is
     /// re-walked soon; the guest's own renames and rmdirs drop them at once.
     dirs: std::sync::Mutex<std::collections::HashMap<PathBuf, (std::sync::Arc<OwnedFd>, std::time::Instant)>>,
+    /// Directories that are only visible as empty, read-only mount points.
+    reveal: Vec<PathBuf>,
 }
 
 const DIR_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -266,6 +270,7 @@ impl Root {
             fd: std::sync::Arc::new(unsafe { OwnedFd::from_raw_fd(fd) }),
             allow: allowed,
             dirs: Default::default(),
+            reveal: Vec::new(),
         })
     }
 
@@ -273,18 +278,33 @@ impl Root {
         &self.path
     }
 
+    /// Makes `dir` and the way down to it visible to the guest as traversable,
+    /// read-only and empty (nothing of what is in it on the Mac), so the guest
+    /// can mount something of its own there: the docker socket at the path
+    /// clients like testcontainers' Ryuk ask the daemon to bind-mount.
+    pub fn reveal(&mut self, dir: &Path) -> Result<(), String> {
+        let c = dir.canonicalize().map_err(|e| format!("revealed path {}: {e}", dir.display()))?;
+        if !c.starts_with(&self.path) || !c.is_dir() {
+            return Err(format!("revealed path {} is not a directory in the share", c.display()));
+        }
+        if matches!(self.access(&c), Access::Denied) {
+            self.reveal.push(c);
+        }
+        Ok(())
+    }
+
     /// Whether `p` is one of the allowed directories or above one, compared
     /// case-insensitively like APFS. Renaming or removing such a path would
     /// change what gets shared on the next start.
     pub fn is_allowed_root(&self, p: &Path) -> bool {
         let p = lower(p);
-        self.allow.iter().any(|a| lower(a).starts_with(&p))
+        self.allow.iter().chain(&self.reveal).any(|a| lower(a).starts_with(&p))
     }
 
     pub fn access(&self, p: &Path) -> Access {
         if self.allow.is_empty() || self.allow.iter().any(|a| p.starts_with(a)) {
             Access::Full
-        } else if self.allow.iter().any(|a| a.starts_with(p)) {
+        } else if self.allow.iter().chain(&self.reveal).any(|a| a.starts_with(p)) {
             Access::Traverse
         } else {
             Access::Denied

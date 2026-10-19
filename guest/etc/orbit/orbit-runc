@@ -19,22 +19,24 @@ if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -
   # Only bind over CA bundles the image already has: nothing new is created in
   # its root filesystem, so no trace of the host CA ends up in an image that
   # BuildKit commits from a RUN step (the bind mount itself is never captured).
-  mounts='[]'; first=""
+  # Few processes on purpose: this runs in front of every container start.
+  binds=""; n=0
   for path in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do
     [ -f "$root$path" ] && [ ! -L "$root$path" ] || continue
-    copy="$bundle/orbit-ca-$(echo "$path" | tr / _)"
-    cat "$root$path" $HOST_CA > "$copy"
-    chmod "$(stat -c %a "$root$path")" "$copy"
-    mounts=$(echo "$mounts" | jq --arg s "$copy" --arg d "$path" '. + [{destination: $d, type: "bind", source: $s, options: ["rbind", "ro"]}]')
-    [ -n "$first" ] || first=$path
+    n=$((n + 1)); copy="$bundle/orbit-ca-$n.pem"
+    # cp -p keeps the bundle's mode for the copy.
+    cp -p "$root$path" "$copy" && cat $HOST_CA >> "$copy" && binds="$binds $copy $path"
   done
-  if [ -n "$first" ]; then
+  if [ -n "$binds" ]; then
     # Node.js ignores the system store; point it at the merged bundle.
-    jq --argjson m "$mounts" --arg ca "$first" '
-      .mounts += $m
+    # shellcheck disable=SC2086 # the bundle path and CA paths have no spaces
+    jq --args '
+      $ARGS.positional as $p
+      | [range(0; $p | length; 2) | {destination: $p[. + 1], type: "bind", source: $p[.], options: ["rbind", "ro"]}] as $m
+      | .mounts += $m
       | if ([.process.env[]? | startswith("NODE_EXTRA_CA_CERTS=")] | any) then .
-        else .process.env += ["NODE_EXTRA_CA_CERTS=" + $ca] end' \
-      "$bundle/config.json" > "$bundle/config.json.orbit" && mv "$bundle/config.json.orbit" "$bundle/config.json"
+        else .process.env += ["NODE_EXTRA_CA_CERTS=" + $m[0].destination] end' \
+      $binds < "$bundle/config.json" > "$bundle/config.json.orbit" && mv "$bundle/config.json.orbit" "$bundle/config.json"
   fi
 fi
 exec /usr/bin/runc "$@"

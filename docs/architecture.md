@@ -53,6 +53,20 @@ Linux holds on to file data as page cache, which the balloon can't report.
 - Both times, it compacts memory so the freed pages form reportable blocks.
 - At all times, it keeps the page cache under 1 GiB through the root cgroup's
   `memory.reclaim` (builds are never idle; the Mac caches `data.img` anyway).
+- While macOS reports memory pressure, it keeps the page cache under 256 MiB
+  (warn) or 64 MiB (critical) instead (`orbit.memd_warn_mb`,
+  `orbit.memd_crit_mb`).
+
+`pressure.rs` watches macOS memory pressure (a libdispatch memory-pressure
+source, plus `kern.memorystatus_vm_pressure_level` re-read every 30 s) and
+sends `pressure normal|warn|critical` on the control vsock. On a change,
+`control.sh` records the level in `/run/orbit-pressure` and runs
+`memd.sh reclaim <level>` right away: reclaim to the new cap (on critical,
+drop all clean caches first) and compact, so free page reporting hands the
+pages back before macOS has to compress them. `ORBIT_PRESSURE=off` turns it
+off, and `ORBIT_PRESSURE=warn|critical` pins the level, for comparisons. It
+helps with cache the guest touched once (a build's inputs, a pulled image);
+a working set the guest keeps re-reading stays resident whatever the cap.
 
 Activity Monitor's Memory column is the process's `phys_footprint`. When the
 Mac is short on memory, macOS compresses or swaps part of guest RAM, and the
@@ -79,10 +93,13 @@ with `ORBIT_MEMDUMP=<prefix>`, `touch <prefix>.req`, and match `<prefix>.bin`
   back in `stat`. Group/other permission bits mirror the owner bits, so
   non-root container users can write to your files.
 - Mac edits reach the guest as inotify events. `fsevents.rs` watches the
-  allowed directories with FSEvents and sends changed paths to
-  `fsnotify.sh` over vsock. The guest then does a same-size `truncate` under a
-  reserved gid, which raises `IN_MODIFY`. The server recognises that gid and
-  doesn't apply the truncate to the Mac file.
+  allowed directories with FSEvents; `forward_events` turns each batch into
+  edits, creations, renames and deletions (from the Mac's current state and
+  what the guest has looked up) and sends them to `fsnotify.sh` over vsock.
+  The guest repeats each change under a reserved gid: a same-size `truncate`
+  for an edit (`IN_MODIFY`), create/mkdir, rename or unlink/rmdir for the
+  rest. The server recognises that gid, never applies any of it to the Mac,
+  and lets it succeed only for paths it queued while the Mac still matches.
 
 ### Networking
 
