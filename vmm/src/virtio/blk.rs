@@ -10,11 +10,13 @@ use crate::memory::GuestMemory;
 
 const VIRTIO_BLK_F_SEG_MAX: u64 = 1 << 2;
 const VIRTIO_BLK_F_FLUSH: u64 = 1 << 9;
+const VIRTIO_BLK_F_DISCARD: u64 = 1 << 13;
 
 const VIRTIO_BLK_T_IN: u32 = 0;
 const VIRTIO_BLK_T_OUT: u32 = 1;
 const VIRTIO_BLK_T_FLUSH: u32 = 4;
 const VIRTIO_BLK_T_GET_ID: u32 = 8;
+const VIRTIO_BLK_T_DISCARD: u32 = 11;
 
 const VIRTIO_BLK_S_OK: u8 = 0;
 const VIRTIO_BLK_S_IOERR: u8 = 1;
@@ -22,6 +24,14 @@ const VIRTIO_BLK_S_UNSUPP: u8 = 2;
 
 const SECTOR: u64 = 512;
 const SEG_MAX: u32 = 126;
+/// Discard (fstrim) punches holes in the image so space the guest freed goes
+/// back to the Mac. APFS punches whole 4 KiB blocks; the guest is told to
+/// align to that, and anything partial at the edges is left allocated.
+const PUNCH_ALIGN: u64 = 4096;
+const MAX_DISCARD_SECTORS: u32 = u32::MAX / 2;
+const MAX_DISCARD_SEG: u32 = 256;
+/// struct virtio_blk_discard_write_zeroes { le64 sector; le32 num_sectors; le32 flags; }
+const DISCARD_SEG_SIZE: u64 = 16;
 
 pub struct Block {
     file: File,
@@ -45,6 +55,26 @@ impl Block {
         }
         let len = file.metadata().map_err(|e| e.to_string())?.len();
         Ok(Self { file, sectors: len / SECTOR, mem: None, queue: None, interrupt: None })
+    }
+
+    /// Frees the whole 4 KiB blocks of `[off, off+len)` in the image file
+    /// (F_PUNCHHOLE: they read back as zeros and stop taking space on the Mac).
+    fn punch(&self, off: u64, len: u64) -> bool {
+        use std::os::fd::AsRawFd;
+        let Some(start) = off.checked_next_multiple_of(PUNCH_ALIGN) else {
+            return false;
+        };
+        let end = (off + len) / PUNCH_ALIGN * PUNCH_ALIGN;
+        if end <= start {
+            return true; // nothing whole to free; discard is only a hint
+        }
+        let arg = libc::fpunchhole_t {
+            fp_flags: 0,
+            reserved: 0,
+            fp_offset: start as libc::off_t,
+            fp_length: (end - start) as libc::off_t,
+        };
+        unsafe { libc::fcntl(self.file.as_raw_fd(), libc::F_PUNCHHOLE, &arg) == 0 }
     }
 
     /// Serves one request; returns (status, bytes written into guest buffers).
@@ -97,6 +127,32 @@ impl Block {
                 Ok(()) => (VIRTIO_BLK_S_OK, 0),
                 Err(_) => (VIRTIO_BLK_S_IOERR, 0),
             },
+            VIRTIO_BLK_T_DISCARD => {
+                let mut segs = 0u32;
+                for d in data {
+                    if d.write_only {
+                        return (VIRTIO_BLK_S_IOERR, 0);
+                    }
+                    for i in 0..(d.len as u64 / DISCARD_SEG_SIZE) {
+                        segs += 1;
+                        if segs > MAX_DISCARD_SEG {
+                            return (VIRTIO_BLK_S_IOERR, 0);
+                        }
+                        let at = d.addr.wrapping_add(i * DISCARD_SEG_SIZE);
+                        let (Some(start), Some(count)) =
+                            (mem.read_obj::<u64>(at), mem.read_obj::<u32>(at.wrapping_add(8)))
+                        else {
+                            return (VIRTIO_BLK_S_IOERR, 0);
+                        };
+                        let off = start.saturating_mul(SECTOR);
+                        let len = count as u64 * SECTOR;
+                        if count > MAX_DISCARD_SECTORS || !in_range(off, len) || !self.punch(off, len) {
+                            return (VIRTIO_BLK_S_IOERR, 0);
+                        }
+                    }
+                }
+                (VIRTIO_BLK_S_OK, 0)
+            }
             VIRTIO_BLK_T_GET_ID => {
                 let id = b"orbit-vmm-disk\0\0\0\0\0\0";
                 match data.first() {
@@ -117,7 +173,7 @@ impl VirtioDevice for Block {
     }
 
     fn features(&self) -> u64 {
-        VIRTIO_F_VERSION_1 | VIRTIO_BLK_F_FLUSH | VIRTIO_BLK_F_SEG_MAX
+        VIRTIO_F_VERSION_1 | VIRTIO_BLK_F_FLUSH | VIRTIO_BLK_F_SEG_MAX | VIRTIO_BLK_F_DISCARD
     }
 
     fn num_queues(&self) -> usize {
@@ -125,10 +181,16 @@ impl VirtioDevice for Block {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        // struct virtio_blk_config { le64 capacity; le32 size_max; le32 seg_max; ... }
-        let mut cfg = [0u8; 16];
+        // struct virtio_blk_config { le64 capacity; le32 size_max; le32 seg_max;
+        //   geometry (4); le32 blk_size; topology (8); u8 writeback; u8; le16 num_queues;
+        //   le32 max_discard_sectors @36; le32 max_discard_seg @40;
+        //   le32 discard_sector_alignment @44; ... }
+        let mut cfg = [0u8; 48];
         cfg[0..8].copy_from_slice(&self.sectors.to_le_bytes());
         cfg[12..16].copy_from_slice(&SEG_MAX.to_le_bytes());
+        cfg[36..40].copy_from_slice(&MAX_DISCARD_SECTORS.to_le_bytes());
+        cfg[40..44].copy_from_slice(&MAX_DISCARD_SEG.to_le_bytes());
+        cfg[44..48].copy_from_slice(&((PUNCH_ALIGN / SECTOR) as u32).to_le_bytes());
         for (i, b) in data.iter_mut().enumerate() {
             *b = cfg.get(offset as usize + i).copied().unwrap_or(0);
         }

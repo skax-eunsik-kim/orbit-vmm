@@ -51,6 +51,17 @@ Linux holds on to file data as page cache, which the balloon can't report.
   (cgroup `memory.reclaim`).
 - After 30 s fully idle, it drops clean caches.
 - Both times, it compacts memory so the freed pages form reportable blocks.
+- At all times, it keeps the page cache under 1 GiB through the root cgroup's
+  `memory.reclaim` (builds are never idle; the Mac caches `data.img` anyway).
+
+Activity Monitor's Memory column is the process's `phys_footprint`. When the
+Mac is short on memory, macOS compresses or swaps part of guest RAM, and the
+footprint then grows past the guest pages the VMM actually holds (by about
+a third to a half of the compressed amount in measurements; it is near zero
+when nothing is compressed). To see which guest pages are held, start the VMM
+with `ORBIT_MEMDUMP=<prefix>`, `touch <prefix>.req`, and match `<prefix>.bin`
+(one `mincore` byte per 16 KiB page of guest RAM) against the guest's
+`/proc/kpageflags` with `vmm/bench/memxref.py`.
 
 ### File sharing (virtio-fs)
 

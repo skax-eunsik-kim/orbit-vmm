@@ -1,5 +1,6 @@
 mod devices;
 mod fsevents;
+mod memdump;
 mod memory;
 mod ports;
 mod reclaim;

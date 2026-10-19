@@ -34,6 +34,17 @@ A metadata-heavy bind-mount workload is 10–20x faster:
 - `ORBIT_CPUS` defaults to the Mac's core count instead of 4. Idle vCPUs
   park, and with 4 vCPUs parallel container start-up queued on CPU.
 - Published ports are picked up every 250 ms instead of every second.
+- `memd` keeps the guest page cache under 1 GiB at all times
+  (`orbit.memd_cache_mb`, 0 turns it off), not only once the VM goes idle.
+  During a monorepo build the cache had grown to 7 GB and the VM to 15 GB on
+  the Mac; with the cap the build peaked at 7.7 GB on the Mac and took no
+  longer (337 s vs 358 s). The Mac caches `data.img` itself, so the guest
+  copy was redundant.
+- The data disk supports discard (`F_PUNCHHOLE` on the image), and `memd`
+  runs `fstrim /data` once after boot and every 10 minutes when the VM is
+  quiet (`orbit.memd_trim`, 0 turns it off). Space Docker frees (pruned
+  images, build cache) now goes back to the Mac: a 35 GB image with 13 GB of
+  pruned build cache shrank to 16 GB, and the data stayed intact.
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
 
