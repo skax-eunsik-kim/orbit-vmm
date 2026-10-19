@@ -27,8 +27,9 @@ memory, so freed memory can actually be returned.
   ([benchmarks](docs/benchmarks.md)).
 - **Bind mounts over virtio-fs.** `-v $PWD:/app` works at the same path as on
   the Mac. It has multiple request queues, attribute caching and readdirplus.
-  Mac edits fire inotify events in containers, so `uvicorn --reload`, vite and
-  nodemon hot reload works. `chown` and `chmod` inside a container work too.
+  Mac edits, new files and directories, renames and deletions fire inotify
+  events in containers, so `uvicorn --reload`, vite and nodemon hot reload
+  keeps working through `git checkout` and code generators. `chown` and `chmod` inside a container work too.
   Both are emulated with xattrs. The real file stays yours and never becomes
   setuid or group- or world-writable on the Mac.
 - **Opt-in sharing.** Only allowed directories are visible to the VM, and
@@ -163,9 +164,11 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
 
 ## Known limitations
 
-- **inotify:** deletions, and files inside *newly created* directories, don't
-  raise inotify events. Restart the watcher, or create the directory from
-  inside the container.
+- **inotify:** Mac-side changes reach containers about a second later. A new
+  directory tree with more than 256 entries (a fresh worktree, an
+  `npm install` on the Mac) raises one `IN_CREATE` for its top directory;
+  recursive watchers scan it from there. Renames pair up only when the guest
+  had already seen the old name; otherwise they show up as delete + create.
 - **testcontainers** mounts the socket path from `DOCKER_HOST`, which doesn't
   exist in the VM. Set
   `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`.

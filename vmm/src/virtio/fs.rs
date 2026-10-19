@@ -110,6 +110,7 @@ const ATTR_LEN: usize = 88;
 const ENTRY_LEN: usize = 40 + ATTR_LEN;
 const ROOT: u64 = 1;
 /// Group id of the guest's fsnotify agent (guest/etc/orbit/fsnotify.sh).
+/// Requests under it never change anything on the Mac (see `notify_op`).
 const NOTIFY_GID: u32 = 4_000_000_001;
 
 // Linux errno values (the guest's).
@@ -254,6 +255,13 @@ fn put_entry(out: &mut Vec<u8>, nodeid: u64, v: Option<&View>) {
     }
 }
 
+/// Attributes for something gone from the Mac that the guest still has to
+/// remove (see `Server::notify_op`).
+fn gone_view(dir: bool) -> View {
+    let mode = if dir { DIR | 0o755 } else { REG | 0o644 };
+    View { attr: Attr { mode, nlink: 1, ..Default::default() }, uid: 0, gid: 0, mode }
+}
+
 fn attr_out(v: &View) -> Vec<u8> {
     let mut out = Vec::with_capacity(104);
     let (at, at_ns) = attr_ttl();
@@ -392,6 +400,8 @@ impl Drop for Charge {
 struct Node {
     path: PathBuf,
     lookups: u64,
+    /// What the guest was last told it is (for replaying its removal).
+    dir: bool,
 }
 
 #[derive(Default)]
@@ -414,6 +424,19 @@ struct Server {
     handle_paths: Mutex<HashMap<u64, PathBuf>>,
     /// Paths the guest changed recently: their FSEvents are our own echo.
     recent: Mutex<HashMap<PathBuf, std::time::Instant>>,
+    /// Mac-side changes the fsnotify agent is replaying right now.
+    pending: Mutex<HashMap<PathBuf, Pending>>,
+}
+
+/// A Mac-side change being replayed in the guest (see `notify_op`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Pending {
+    /// Exists on the Mac (created, or a rename's new name): the agent's
+    /// lookup says "no such file" so its create/mkdir/rename really runs.
+    Appeared,
+    /// Gone from the Mac (deleted, or a rename's old name): the agent's lookup
+    /// still finds it so its unlink/rmdir/rename really runs.
+    Gone { dir: bool },
 }
 
 type Reply = Result<Vec<u8>, i32>;
@@ -421,7 +444,7 @@ type Reply = Result<Vec<u8>, i32>;
 impl Server {
     fn new(root: Root) -> Self {
         let mut t = Tables { next_node: 2, ..Default::default() };
-        t.nodes.insert(ROOT, Node { path: root.path().to_path_buf(), lookups: 1 << 40 });
+        t.nodes.insert(ROOT, Node { path: root.path().to_path_buf(), lookups: 1 << 40, dir: true });
         t.by_path.insert(root.path().to_path_buf(), ROOT);
         Self {
             root,
@@ -432,6 +455,7 @@ impl Server {
             writeback: AtomicBool::new(false),
             handle_paths: Mutex::new(HashMap::new()),
             recent: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
         }
     }
 
@@ -485,7 +509,7 @@ impl Server {
 
     /// Counts one guest lookup of `path` and returns its node id (None when the
     /// table is full: the guest is looking things up without ever forgetting).
-    fn remember(&self, path: PathBuf) -> Option<u64> {
+    fn remember(&self, path: PathBuf, mode: u32) -> Option<u64> {
         let mut t = self.tables.lock().unwrap();
         let id = match t.by_path.get(&path) {
             Some(&id) => id,
@@ -496,11 +520,13 @@ impl Server {
                 t.next_node += 1;
                 t.path_bytes += path.as_os_str().len();
                 t.by_path.insert(path.clone(), id);
-                t.nodes.insert(id, Node { path, lookups: 0 });
+                t.nodes.insert(id, Node { path, lookups: 0, dir: false });
                 id
             }
         };
-        t.nodes.get_mut(&id).unwrap().lookups += 1;
+        let n = t.nodes.get_mut(&id).unwrap();
+        n.lookups += 1;
+        n.dir = mode & libc::S_IFMT as u32 == DIR;
         Some(id)
     }
 
@@ -508,10 +534,23 @@ impl Server {
     fn entry(&self, path: PathBuf) -> Reply {
         self.visible(&path)?;
         let v = self.view(&path)?;
-        let id = self.remember(path).ok_or(ENOMEM)?;
+        let id = self.remember(path.clone(), v.attr.mode).ok_or(ENOMEM)?;
         let mut out = Vec::with_capacity(ENTRY_LEN);
         put_entry(&mut out, id, Some(&v));
+        self.uncache_pending(&mut out, &path);
         Ok(out)
+    }
+
+    /// Until the fsnotify agent has replayed a Mac-side creation, the guest
+    /// must not cache the new name (a watcher's scan would otherwise make the
+    /// agent's create find it and fail): zero the timeouts of the entry that
+    /// `out` ends with.
+    fn uncache_pending(&self, out: &mut [u8], path: &Path) {
+        let p = self.pending.lock().unwrap();
+        if !p.is_empty() && p.get(path) == Some(&Pending::Appeared) {
+            let start = out.len() - ENTRY_LEN;
+            out[start + 16..start + 40].fill(0);
+        }
     }
 
     fn forget(&self, node: u64, n: u64) {
@@ -594,15 +633,150 @@ impl Server {
         self.recent.lock().unwrap().get(path).is_some_and(|t| t.elapsed().as_secs() < 2)
     }
 
-    /// Whether the guest knows this file or its directory (it can't be
-    /// watching anything it never looked up).
-    fn watched(&self, path: &Path) -> bool {
-        let t = self.tables.lock().unwrap();
-        t.by_path.contains_key(path) || path.parent().is_some_and(|d| t.by_path.contains_key(d))
+    fn pending(&self, p: &Path) -> Option<Pending> {
+        self.pending.lock().unwrap().get(p).copied()
+    }
+
+    fn on_mac(&self, p: &Path) -> Result<Option<Attr>, i32> {
+        match self.root.lstat(p) {
+            Ok(a) => Ok(Some(a)),
+            Err(libc::ENOENT) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Requests from the guest's fsnotify agent (gid NOTIFY_GID). It replays a
+    /// change already made on the Mac by doing the same thing in the guest, so
+    /// the guest kernel emits the inotify events watchers expect (IN_CREATE,
+    /// IN_DELETE, IN_MOVED_FROM/TO). None of it reaches the Mac: each
+    /// operation only succeeds, as a no-op, for a path forward_events queued
+    /// and only while the Mac still matches; everything else that would
+    /// change the Mac is refused. None = handle the request normally.
+    fn notify_op(&self, opcode: u32, node: u64, r: &mut Reader) -> Option<Reply> {
+        let kind = |a: &Attr| a.mode & libc::S_IFMT as u32;
+        let reply = match opcode {
+            FUSE_LOOKUP => {
+                let p = self.child(node, r.name()).ok()?;
+                match (self.pending(&p)?, self.on_mac(&p).ok()?) {
+                    (Pending::Appeared, Some(_)) => Err(ENOENT),
+                    (Pending::Gone { dir }, None) => {
+                        // Not cached: any other lookup sees the Mac again.
+                        let v = gone_view(dir);
+                        let id = self.remember(p.clone(), v.mode)?;
+                        let mut out = Vec::with_capacity(ENTRY_LEN);
+                        put_entry(&mut out, id, Some(&v));
+                        out[16..40].fill(0);
+                        Ok(out)
+                    }
+                    _ => return None,
+                }
+            }
+            FUSE_GETATTR => {
+                // A cached inode for something gone from the Mac: keep it
+                // alive for the agent's unlink/rmdir/rename.
+                let p = self.path(node).ok()?;
+                match (self.pending(&p)?, self.on_mac(&p).ok()?) {
+                    (Pending::Gone { dir }, None) => {
+                        let mut out = attr_out(&gone_view(dir));
+                        out[..12].fill(0);
+                        Ok(out)
+                    }
+                    _ => return None,
+                }
+            }
+            FUSE_CREATE | FUSE_MKDIR => {
+                let dir = opcode == FUSE_MKDIR;
+                r.skip(if dir { 8 } else { 16 });
+                self.child(node, r.name()).and_then(|p| {
+                    self.writable(&p)?;
+                    let want = if dir { DIR } else { REG };
+                    match (self.pending(&p), self.on_mac(&p)?) {
+                        (Some(Pending::Appeared), Some(a)) if kind(&a) == want => {}
+                        (_, Some(_)) => return Err(EEXIST),
+                        _ => return Err(ENOENT),
+                    }
+                    self.pending.lock().unwrap().remove(&p); // replayed
+                    if dir {
+                        return self.entry(p);
+                    }
+                    let fh = self.open(&p, 0, None)?; // read-only on the Mac
+                    match self.entry(p) {
+                        Ok(mut out) => {
+                            out.extend_from_slice(&open_out(fh, 0));
+                            Ok(out)
+                        }
+                        Err(e) => {
+                            self.handles.lock().unwrap().remove(&fh);
+                            self.handle_paths.lock().unwrap().remove(&fh);
+                            Err(e)
+                        }
+                    }
+                })
+            }
+            FUSE_UNLINK | FUSE_RMDIR => self.child(node, r.name()).and_then(|p| {
+                self.writable(&p)?;
+                match (self.pending(&p), self.on_mac(&p)?) {
+                    // Either call: the guest knows best what kind it was.
+                    (Some(Pending::Gone { .. }), None) => {
+                        self.pending.lock().unwrap().remove(&p);
+                        Ok(Vec::new())
+                    }
+                    _ => Err(EPERM),
+                }
+            }),
+            FUSE_RENAME | FUSE_RENAME2 => {
+                let newdir = r.u64();
+                if opcode == FUSE_RENAME2 {
+                    if r.u32() & !1 != 0 {
+                        return Some(Err(EINVAL)); // only RENAME_NOREPLACE
+                    }
+                    r.skip(4);
+                }
+                let old = r.name().to_owned();
+                let new = r.name().to_owned();
+                (|| {
+                    let from = self.child(node, &old)?;
+                    let to = self.child(newdir, &new)?;
+                    self.writable(&from)?;
+                    self.writable(&to)?;
+                    let gone =
+                        matches!(self.pending(&from), Some(Pending::Gone { .. })) && self.on_mac(&from)?.is_none();
+                    let there = self.pending(&to) == Some(Pending::Appeared) && self.on_mac(&to)?.is_some();
+                    if !gone || !there {
+                        return Err(EPERM);
+                    }
+                    let mut t = self.tables.lock().unwrap();
+                    let moves = plan_moves(&t, &[(&from, &to)]);
+                    let stale: Vec<PathBuf> = t.by_path.keys().filter(|p| p.starts_with(&to)).cloned().collect();
+                    for p in stale {
+                        t.by_path.remove(&p);
+                    }
+                    apply_moves(&mut t, moves);
+                    let mut p = self.pending.lock().unwrap();
+                    p.remove(&from);
+                    p.remove(&to);
+                    Ok(Vec::new())
+                })()
+            }
+            FUSE_OPEN => {
+                // Never open the Mac file for writing.
+                let flags = r.u32();
+                let keep = if flags & 3 == 0 { FOPEN_KEEP_CACHE } else { 0 };
+                self.path(node).and_then(|p| self.open(&p, 0, None)).map(|fh| open_out(fh, keep))
+            }
+            FUSE_MKNOD | FUSE_SYMLINK | FUSE_LINK | FUSE_WRITE => Err(EPERM),
+            _ => return None,
+        };
+        Some(reply)
     }
 
     fn handle(&self, opcode: u32, node: u64, caller: (u32, u32), body: &[u8], write_data: &[u8]) -> Option<Reply> {
         let mut r = Reader { b: body, off: 0 };
+        if caller.1 == NOTIFY_GID {
+            if let Some(reply) = self.notify_op(opcode, node, &mut Reader { b: body, off: 0 }) {
+                return Some(reply);
+            }
+        }
         let reply = match opcode {
             FUSE_INIT => {
                 let major = r.u32();
@@ -943,8 +1117,11 @@ impl Server {
             match attr {
                 Some(a) => {
                     let v = view(&self.root, &path, a);
-                    match self.remember(path) {
-                        Some(id) => put_entry(&mut out, id, Some(&v)),
+                    match self.remember(path.clone(), a.mode) {
+                        Some(id) => {
+                            put_entry(&mut out, id, Some(&v));
+                            self.uncache_pending(&mut out, &path);
+                        }
                         None => put_entry(&mut out, 0, None), // node table full: no lookup
                     }
                 }
@@ -1159,17 +1336,186 @@ fn statfs_out(s: &libc::statvfs) -> Vec<u8> {
 
 // ---- Mac-side change → guest inotify ------------------------------------------
 
-/// Batches FSEvents for files the guest knows about and sends their paths to
-/// the guest's fsnotify agent, which replays them as inotify events.
+/// One replayed change, as a line for the guest's fsnotify agent (protocol 3).
+#[derive(Debug, PartialEq)]
+enum Replay {
+    Modify(PathBuf),
+    Create {
+        path: PathBuf,
+        dir: bool,
+    },
+    Remove {
+        path: PathBuf,
+        dir: bool,
+    },
+    Move {
+        from: PathBuf,
+        to: PathBuf,
+        dir: bool,
+    },
+    /// Give recursive watchers time to watch the directories just created
+    /// before anything is created inside them.
+    Settle,
+}
+
+/// Most creations replayed per batch: each costs the guest a few processes.
+const MAX_CREATES: usize = 2_000;
+/// A new directory tree with more entries than this (a new git worktree, an
+/// npm install) is announced by its top directory only: recursive watchers
+/// scan a new directory when they see it, and nothing is watching most of these.
+const MAX_NEW_TREE: usize = 256;
+
+/// Turns a batch of FSEvents into what the guest should see, from the Mac's
+/// current state and what the guest has looked up (`known`). FSEvents flags
+/// accumulate over a file's recent history, so existence decides: a path that
+/// exists and the guest doesn't know was created (if its directory is known
+/// or itself new), one the guest knows that is gone was removed, and a rename
+/// is an old name that is gone directly followed by a new name that exists.
+/// A removed directory often comes without events for what was in it, so
+/// whatever the guest knows below it (`known_below`) is removed too.
+fn plan_replay(
+    batch: &[crate::fsevents::Event],
+    known_as: impl Fn(&Path) -> Option<bool>,
+    known_below: impl Fn(&Path) -> Vec<(PathBuf, bool)>,
+    on_mac: impl Fn(&Path) -> Option<Attr>,
+) -> Vec<Replay> {
+    use crate::fsevents::*;
+    let known = |p: &Path| known_as(p).is_some();
+    let is_dir = |a: &Attr| a.mode & libc::S_IFMT as u32 == DIR;
+    let is_file = |a: &Attr| a.mode & libc::S_IFMT as u32 == REG;
+    let changed = ITEM_MODIFIED | ITEM_CREATED | ITEM_RENAMED | ITEM_INODE_META_MOD;
+    let mut moves = Vec::new();
+    let mut paired = std::collections::HashSet::new();
+    for w in batch.windows(2) {
+        let ((from, f1, id1), (to, f2, id2)) = (&w[0], &w[1]);
+        if f1 & f2 & ITEM_RENAMED == 0 || *id2 != id1 + 1 || paired.contains(from) || !known(from) {
+            continue;
+        }
+        if on_mac(from).is_some() || from == to {
+            continue;
+        }
+        if let Some(a) = on_mac(to).filter(|a| is_dir(a) || is_file(a)) {
+            moves.push(Replay::Move { from: from.clone(), to: to.clone(), dir: is_dir(&a) });
+            paired.insert(from.clone());
+            paired.insert(to.clone());
+        }
+    }
+    // Flags per path, in first-seen order, for paths in or below something the
+    // guest knows (checked cheaply here: the rest of the Mac is busy too).
+    let in_batch: std::collections::HashSet<&Path> = batch.iter().map(|(p, _, _)| p.as_path()).collect();
+    let mut flags: Vec<(&PathBuf, u32)> = Vec::new();
+    let mut at: HashMap<&PathBuf, usize> = HashMap::new();
+    for (p, f, _) in batch {
+        let near = known(p) || p.parent().is_some_and(|d| known(d) || in_batch.contains(d));
+        if paired.contains(p) || !near {
+            continue;
+        }
+        match at.get(p) {
+            Some(&i) => flags[i].1 |= f,
+            None => {
+                at.insert(p, flags.len());
+                flags.push((p, *f));
+            }
+        }
+    }
+    let mut created = Vec::new();
+    let mut removed = Vec::new();
+    let mut modified = Vec::new();
+    for (p, f) in flags {
+        let parent_known = p.parent().is_some_and(&known);
+        match on_mac(p) {
+            Some(a) if !is_dir(&a) && !is_file(&a) => {} // symlinks etc.
+            Some(a) if known(p) => {
+                if is_file(&a) && f & changed != 0 {
+                    modified.push(p.clone());
+                }
+            }
+            Some(a) if f & (ITEM_CREATED | ITEM_RENAMED) != 0 => created.push((p.clone(), is_dir(&a))),
+            Some(a) => {
+                if is_file(&a) && parent_known && f & changed != 0 {
+                    modified.push(p.clone());
+                }
+            }
+            None if known(p) || (parent_known && f & ITEM_CREATED == 0) => {
+                let dir = known_as(p).unwrap_or(f & ITEM_IS_DIR != 0);
+                if dir {
+                    for (c, dir) in known_below(p) {
+                        removed.push(Replay::Remove { path: c, dir });
+                    }
+                }
+                removed.push(Replay::Remove { path: p.clone(), dir })
+            }
+            None => {}
+        }
+    }
+    // A creation only matters below a directory the guest knows or sees
+    // being created; shallowest first, settling after each level of new dirs.
+    created.sort_by_key(|(p, _)| p.components().count());
+    // Each accepted creation with the top of its new tree.
+    let mut tree_of: HashMap<PathBuf, PathBuf> = HashMap::new();
+    let mut tree_size: HashMap<PathBuf, usize> = HashMap::new();
+    let mut accepted = Vec::new();
+    for (p, dir) in created {
+        let parent = p.parent().unwrap_or(&p);
+        let top = if known(parent) {
+            p.clone()
+        } else if let Some(t) = tree_of.get(parent) {
+            t.clone()
+        } else {
+            continue;
+        };
+        *tree_size.entry(top.clone()).or_default() += 1;
+        if dir {
+            tree_of.insert(p.clone(), top.clone());
+        }
+        accepted.push((p, dir, top));
+    }
+    let mut creates = Vec::new();
+    let mut level = 0;
+    let mut level_has_dirs = false;
+    let mut n = 0;
+    for (p, dir, top) in accepted {
+        if (p != top && tree_size[&top] > MAX_NEW_TREE) || n == MAX_CREATES {
+            continue;
+        }
+        n += 1;
+        let depth = p.components().count();
+        if depth != level {
+            if level_has_dirs {
+                creates.push(Replay::Settle);
+            }
+            level = depth;
+            level_has_dirs = false;
+        }
+        level_has_dirs |= dir;
+        creates.push(Replay::Create { path: p, dir });
+    }
+    let mut seen = std::collections::HashSet::new();
+    removed.retain(|r| match r {
+        Replay::Remove { path, .. } => seen.insert(path.clone()),
+        _ => true,
+    });
+    removed.sort_by_key(|r| match r {
+        Replay::Remove { path, .. } => std::cmp::Reverse(path.components().count()),
+        _ => std::cmp::Reverse(0),
+    });
+    let mut out = moves;
+    out.extend(removed);
+    out.extend(creates);
+    out.extend(modified.into_iter().map(Replay::Modify));
+    out
+}
+
+/// Batches FSEvents for paths the guest can see and sends them to the guest's
+/// fsnotify agent, which replays them as inotify events (see `notify_op`).
 fn forward_events(
     server: Arc<Server>,
     root: PathBuf,
     tag: String,
     sock: PathBuf,
-    rx: std::sync::mpsc::Receiver<(PathBuf, u32)>,
+    rx: std::sync::mpsc::Receiver<crate::fsevents::Event>,
 ) {
-    use crate::fsevents::*;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::time::{Duration, Instant};
     loop {
         let Ok(first) = rx.recv() else { return };
@@ -1178,36 +1524,82 @@ fn forward_events(
         while let Ok(ev) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
             batch.push(ev);
         }
-        let mut rels = std::collections::BTreeSet::new();
-        for (path, flags) in batch {
-            let changed = flags & (ITEM_MODIFIED | ITEM_CREATED | ITEM_RENAMED | ITEM_INODE_META_MOD) != 0;
-            if flags & ITEM_IS_FILE == 0 || !changed || !path.is_file() {
-                continue; // directories, xattr-only updates (our ownership records), deletions
-            }
-            if server.recently_touched(&path)
-                || !server.watched(&path)
-                || !matches!(server.root.access(&path), Access::Full)
-            {
-                continue;
-            }
-            if let Ok(rel) = path.strip_prefix(&root) {
-                if let Some(rel) = rel.to_str().filter(|r| !r.contains('\n') && !r.contains('\t')) {
-                    rels.insert(rel.to_string());
-                }
-            }
+        // Only paths a line can carry, inside an allowed directory, and not
+        // the echo of something the guest did itself.
+        batch.retain(|(p, _, _)| {
+            p.strip_prefix(&root)
+                .ok()
+                .and_then(|r| r.to_str())
+                .is_some_and(|r| !r.is_empty() && !r.contains('\n') && !r.contains('\t'))
+                && matches!(server.root.access(p), Access::Full)
+                && !server.recently_touched(p)
+        });
+        // Look at the Mac without holding the node table (FUSE requests wait on it).
+        let near: std::collections::HashSet<PathBuf> = {
+            let t = server.tables.lock().unwrap();
+            let in_batch: std::collections::HashSet<&Path> = batch.iter().map(|(p, _, _)| p.as_path()).collect();
+            let known = |p: &Path| t.by_path.contains_key(p);
+            let near = |p: &Path| known(p) || p.parent().is_some_and(|d| known(d) || in_batch.contains(d));
+            batch.iter().map(|(p, _, _)| p).filter(|p| near(p)).cloned().collect()
+        };
+        let mac: HashMap<&Path, Option<Attr>> = near.iter().map(|p| (p.as_path(), server.root.lstat(p).ok())).collect();
+        let ops = {
+            let t = server.tables.lock().unwrap();
+            plan_replay(
+                &batch,
+                |p| t.by_path.get(p).and_then(|id| t.nodes.get(id)).map(|n| n.dir),
+                |d| {
+                    let below = t.by_path.iter().filter(|(p, _)| p.starts_with(d) && *p != d);
+                    below.filter_map(|(p, id)| Some((p.clone(), t.nodes.get(id)?.dir))).collect()
+                },
+                |p| mac.get(p).copied().flatten(),
+            )
+        };
+        if std::env::var_os("ORBIT_DEBUG").is_some() {
+            eprintln!("fsnotify: {batch:x?} -> {ops:?}");
         }
-        if rels.is_empty() {
+        if ops.is_empty() {
             continue;
+        }
+        let rel = |p: &Path| p.strip_prefix(&root).unwrap().to_str().unwrap().to_string();
+        let mut msg = String::from("orbit-fsnotify 3\n");
+        let mut queued = Vec::new();
+        for op in &ops {
+            let line = match op {
+                Replay::Modify(p) => format!("M\t{tag}\t{}", rel(p)),
+                Replay::Create { path, dir } => {
+                    queued.push((path.clone(), Pending::Appeared));
+                    format!("{}\t{tag}\t{}", if *dir { "D" } else { "C" }, rel(path))
+                }
+                Replay::Remove { path, dir } => {
+                    queued.push((path.clone(), Pending::Gone { dir: *dir }));
+                    format!("{}\t{tag}\t{}", if *dir { "X" } else { "R" }, rel(path))
+                }
+                Replay::Move { from, to, dir } => {
+                    queued.push((from.clone(), Pending::Gone { dir: *dir }));
+                    queued.push((to.clone(), Pending::Appeared));
+                    format!("V\t{tag}\t{}\t{}", rel(from), rel(to))
+                }
+                Replay::Settle => "S".to_string(),
+            };
+            msg.push_str(&line);
+            msg.push('\n');
         }
         // Let attributes the guest cached before the change expire, so the
         // watcher that wakes up reads the new size/content.
         let (s, ns) = attr_ttl();
         std::thread::sleep(Duration::new(s, ns) + Duration::from_millis(100));
+        server.pending.lock().unwrap().extend(queued.iter().cloned());
         if let Ok(mut conn) = std::os::unix::net::UnixStream::connect(&sock) {
-            let mut msg = String::from("orbit-fsnotify 2\n");
-            msg.extend(rels.iter().map(|r| format!("{tag}\t{r}\n")));
             let _ = conn.write_all(msg.as_bytes());
             let _ = conn.shutdown(std::net::Shutdown::Write);
+            // The agent closes the connection when it is done.
+            let _ = conn.set_read_timeout(Some(Duration::from_secs(60)));
+            let _ = conn.read_to_end(&mut Vec::new());
+        }
+        let mut pending = server.pending.lock().unwrap();
+        for (p, _) in queued {
+            pending.remove(&p);
         }
     }
 }
@@ -1433,5 +1825,126 @@ impl VirtioDevice for Fs {
         for w in &self.workers {
             *w.0.lock().unwrap() = Slot::default();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fsevents::*;
+
+    fn plan(batch: &[(&str, u32, u64)], known: &[&str], mac: &[(&str, bool)]) -> Vec<Replay> {
+        let batch: Vec<Event> = batch.iter().map(|(p, f, i)| (PathBuf::from(p), *f, *i)).collect();
+        let attr = |dir: bool| Attr { mode: if dir { DIR | 0o755 } else { REG | 0o644 }, ..Default::default() };
+        plan_replay(
+            &batch,
+            |p| known.iter().find(|k| Path::new(k) == p).map(|k| !k.contains('.')),
+            |d| {
+                let below = known.iter().filter(|k| Path::new(k).starts_with(d) && Path::new(k) != d);
+                below.map(|k| (pb(k), !k.contains('.'))).collect()
+            },
+            |p| mac.iter().find(|(m, _)| Path::new(m) == p).map(|(_, d)| attr(*d)),
+        )
+    }
+
+    fn pb(p: &str) -> PathBuf {
+        PathBuf::from(p)
+    }
+
+    #[test]
+    fn new_file_and_new_subdir_contents() {
+        let ops = plan(
+            &[
+                ("/r/w/sub/a.py", ITEM_CREATED, 3),
+                ("/r/w/sub", ITEM_CREATED | ITEM_IS_DIR, 2),
+                ("/r/w/b.py", ITEM_CREATED, 4),
+            ],
+            &["/r/w"],
+            &[("/r/w/sub", true), ("/r/w/sub/a.py", false), ("/r/w/b.py", false)],
+        );
+        assert_eq!(
+            ops,
+            vec![
+                Replay::Create { path: pb("/r/w/sub"), dir: true },
+                Replay::Create { path: pb("/r/w/b.py"), dir: false },
+                Replay::Settle,
+                Replay::Create { path: pb("/r/w/sub/a.py"), dir: false },
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_delete_modify() {
+        let ops = plan(
+            &[
+                ("/r/w/old.py", ITEM_RENAMED, 10),
+                ("/r/w/new.py", ITEM_RENAMED, 11),
+                ("/r/w/gone.py", ITEM_REMOVED, 12),
+                ("/r/w/edit.py", ITEM_MODIFIED | ITEM_CREATED, 13),
+            ],
+            &["/r/w", "/r/w/old.py", "/r/w/gone.py", "/r/w/edit.py"],
+            &[("/r/w/new.py", false), ("/r/w/edit.py", false)],
+        );
+        assert_eq!(
+            ops,
+            vec![
+                Replay::Move { from: pb("/r/w/old.py"), to: pb("/r/w/new.py"), dir: false },
+                Replay::Remove { path: pb("/r/w/gone.py"), dir: false },
+                Replay::Modify(pb("/r/w/edit.py")),
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_unrelated_and_transient() {
+        // Unknown directory, an existing dir the guest never looked at, and an
+        // editor's temp file that came and went.
+        let ops = plan(
+            &[
+                ("/r/x/a.py", ITEM_MODIFIED, 1),
+                ("/r/w/old", ITEM_MODIFIED | ITEM_IS_DIR, 2),
+                ("/r/w/.tmp", ITEM_CREATED | ITEM_REMOVED, 3),
+            ],
+            &["/r/w"],
+            &[("/r/x/a.py", false), ("/r/w/old", true)],
+        );
+        assert_eq!(ops, vec![]);
+    }
+
+    #[test]
+    fn removed_dir_takes_known_contents() {
+        let ops = plan(
+            &[("/r/w/d", ITEM_REMOVED | ITEM_IS_DIR, 1)],
+            &["/r/w", "/r/w/d", "/r/w/d/s", "/r/w/d/s/f.txt", "/r/w/d/g.txt"],
+            &[],
+        );
+        assert_eq!(ops.len(), 4);
+        assert_eq!(ops[0], Replay::Remove { path: pb("/r/w/d/s/f.txt"), dir: false });
+        assert_eq!(ops[3], Replay::Remove { path: pb("/r/w/d"), dir: true });
+        assert!(ops.contains(&Replay::Remove { path: pb("/r/w/d/s"), dir: true }));
+    }
+
+    #[test]
+    fn big_new_tree_is_only_its_top() {
+        let mut batch = vec![("/r/w/big".to_string(), ITEM_CREATED | ITEM_IS_DIR, 0)];
+        let mut mac = vec![("/r/w/big".to_string(), true)];
+        for i in 0..=MAX_NEW_TREE {
+            batch.push((format!("/r/w/big/f{i}"), ITEM_CREATED, i as u64 + 1));
+            mac.push((format!("/r/w/big/f{i}"), false));
+        }
+        let batch: Vec<(&str, u32, u64)> = batch.iter().map(|(p, f, i)| (p.as_str(), *f, *i)).collect();
+        let mac: Vec<(&str, bool)> = mac.iter().map(|(p, d)| (p.as_str(), *d)).collect();
+        assert_eq!(plan(&batch, &["/r/w"], &mac), vec![Replay::Create { path: pb("/r/w/big"), dir: true }]);
+    }
+
+    #[test]
+    fn atomic_save_is_a_modify() {
+        // write temp, rename over the original: the guest never saw the temp.
+        let ops = plan(
+            &[("/r/w/.a.py.tmp", ITEM_CREATED | ITEM_RENAMED, 1), ("/r/w/a.py", ITEM_RENAMED, 2)],
+            &["/r/w", "/r/w/a.py"],
+            &[("/r/w/a.py", false)],
+        );
+        assert_eq!(ops, vec![Replay::Modify(pb("/r/w/a.py"))]);
     }
 }

@@ -29,6 +29,15 @@ All notable changes are listed here. The format follows
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
 
+### Fixed
+
+- Files and directories created, renamed or deleted on the Mac now raise
+  `IN_CREATE`, `IN_MOVED_FROM`/`IN_MOVED_TO` and `IN_DELETE` in containers,
+  including files inside new subdirectories, so hot reload survives
+  `git checkout` and code generators. The guest agent repeats the change
+  itself under the reserved gid; the VMM answers those requests without
+  touching the Mac, and only for paths it queued while the Mac still matches.
+
 ### Security
 
 - Run the VMM, `vmm-up.sh` and the health check from an installed copy in
