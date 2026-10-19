@@ -92,6 +92,21 @@ if modprobe -q zram && [ -e /sys/block/zram0 ]; then
 fi
 /etc/orbit/binfmt.sh && [ -e /proc/sys/fs/binfmt_misc/qemu-x86_64 ] && log "amd64 emulation: qemu-x86_64"
 mount -t virtiofs users /Users || log "virtiofs /Users mount failed"
+# Clients that bind-mount DOCKER_HOST's socket into a container (testcontainers'
+# Ryuk) hand dockerd the Mac's path, e.g. ~/.orbit/vmm/docker.sock. The VMM
+# passes it as orbit.dockersock= and shows its directory as an empty mount
+# point; put a link to our own socket there.
+for arg in $(cat /proc/cmdline); do
+  case "$arg" in orbit.dockersock=/*) sock=${arg#orbit.dockersock=} ;; esac
+done
+case "$sock" in *..*|*/./*) sock= ;; esac
+if [ -n "$sock" ]; then
+  d=${sock%/*}
+  case "$d" in
+    /Users/*) [ -d "$d" ] && mount -t tmpfs -o mode=0755,size=64k orbit-docker-sock "$d" ;;
+    *) mkdir -p "$d" ;;
+  esac && ln -sfn /var/run/docker.sock "$sock" || log "cannot link $sock to the docker socket"
+fi
 # From here on resolve through dnsmasq (dns.sh, started by init right after this).
 echo "nameserver $(cat /etc/orbit/guest-ip)" > /etc/resolv.conf
 log "ready"

@@ -42,6 +42,8 @@ pub struct Share {
     pub notify: Option<PathBuf>,
     /// Only these directories (and the way down to them) are visible; empty = all.
     pub allow: Vec<PathBuf>,
+    /// Shown as an empty, read-only directory for the guest to mount over.
+    pub reveal: Option<PathBuf>,
 }
 
 // ---- FUSE protocol ---------------------------------------------------------
@@ -1631,7 +1633,13 @@ impl Fs {
             return Err("virtiofs tag longer than 36 bytes".into());
         }
         let root = share.path.canonicalize().map_err(|e| e.to_string())?;
-        let server = Arc::new(Server::new(Root::open(&root, &share.allow)?));
+        let mut fs_root = Root::open(&root, &share.allow)?;
+        if let Some(dir) = share.reveal.as_ref().filter(|d| d.starts_with(&root)) {
+            if let Err(e) = fs_root.reveal(dir) {
+                eprintln!("orbit-vmm: virtiofs: {e}");
+            }
+        }
+        let server = Arc::new(Server::new(fs_root));
         if let Some(sock) = share.notify.clone() {
             let (tx, rx) = std::sync::mpsc::channel();
             crate::fsevents::watch(&root, tx)?;

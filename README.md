@@ -169,9 +169,6 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
   `npm install` on the Mac) raises one `IN_CREATE` for its top directory;
   recursive watchers scan it from there. Renames pair up only when the guest
   had already seen the old name; otherwise they show up as delete + create.
-- **testcontainers** mounts the socket path from `DOCKER_HOST`, which doesn't
-  exist in the VM. Set
-  `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`.
 - **Port forwarding:** UDP and `127.0.0.1:`-bound publishes aren't forwarded.
   If two VMs publish the same port, the second one's forward fails (logged).
 - **Bind mounts:** no file locks are shared between the Mac and containers.

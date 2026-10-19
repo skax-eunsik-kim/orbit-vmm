@@ -62,6 +62,7 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Config {
                         tag: tag.into(),
                         notify: None,
                         allow: Vec::new(),
+                        reveal: None,
                     }),
                     _ => die(&format!("bad --share {spec}, want DIR:TAG")),
                 }
