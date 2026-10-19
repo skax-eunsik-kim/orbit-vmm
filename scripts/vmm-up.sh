@@ -46,7 +46,7 @@ if [ -n "${ORBIT_SHARE_ALLOW:-}" ]; then
   done
   ORBIT_SHARE_ALLOW=$abs
 fi
-for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_GUEST ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK; do
+for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_GUEST ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK ORBIT_WARN_FREE_GB ORBIT_STOP_FREE_GB; do
   [ -n "${!v:-}" ] && printf '%s=%q\n' "$v" "${!v}"
 done > "$D/config.env"
 

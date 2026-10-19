@@ -5,6 +5,18 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Disk
+
+- The build cache cap works again. Docker 28+ reads `defaultKeepStorage`
+  as a reserved floor, not a cap, so the cache grew without limit (33 GB
+  seen). daemon.json now sets `defaultMaxUsedSpace` 20 GB,
+  `defaultMinFreeSpace` 10 GB and `defaultReservedSpace` 2 GB.
+- Disk guard in the supervisor:
+  - Below `ORBIT_WARN_FREE_GB` (10) free on the Mac you get a notification.
+  - Below `ORBIT_STOP_FREE_GB` (3) the guest shuts down cleanly and stays
+    down. A full Mac disk corrupted a guest's ext4 in testing.
+  - The VM doesn't start below that threshold either.
+
 ### Performance
 
 A metadata-heavy bind-mount workload is 10–20x faster:

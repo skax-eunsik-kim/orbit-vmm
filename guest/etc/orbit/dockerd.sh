@@ -2,7 +2,10 @@
 # Respawned by init. Logs go to the host console log.
 # daemon.json: runc wrapper as default runtime (host CA injection, see
 # orbit-runc), host-gateway → the Mac, for `extra_hosts: host-gateway`, and
-# a 20 GB build cache cap like Docker Desktop's (it otherwise fills the disk).
+# a build cache cap (it otherwise fills the disk). Docker 28+ reads
+# defaultKeepStorage as a *reserved* floor, not a cap: the cap is
+# defaultMaxUsedSpace, and defaultMinFreeSpace keeps the guest disk from
+# filling up (the data disk is a file on your Mac).
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<JSON
 {
@@ -10,7 +13,7 @@ cat > /etc/docker/daemon.json <<JSON
   "default-runtime": "orbit",
   "host-gateway-ip": "$(cat /etc/orbit/host-ip 2>/dev/null || echo 10.0.2.2)",
   "group": "root",
-  "builder": { "gc": { "enabled": true, "defaultKeepStorage": "20GB" } }
+  "builder": { "gc": { "enabled": true, "defaultReservedSpace": "2GB", "defaultMaxUsedSpace": "20GB", "defaultMinFreeSpace": "10GB" } }
 }
 JSON
 # docker.sock is root:root 0660 like Docker Desktop/OrbStack, so compose files

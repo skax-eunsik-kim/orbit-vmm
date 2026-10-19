@@ -6,6 +6,10 @@
 #  - Hang detection: once the guest has answered, it is pinged over the control
 #    socket every 30 s. After 3 missed pings in a row the VMM gets SIGABRT
 #    (macOS writes a crash report with every thread's stack), then SIGKILL.
+#  - Disk guard: the data disk is a file on the Mac. Below ORBIT_WARN_FREE_GB
+#    (10) free on its volume you get a notification; below ORBIT_STOP_FREE_GB
+#    (3) the guest is shut down cleanly before the disk fills (a full disk
+#    corrupts the guest's ext4), and it isn't restarted.
 #  - Every abnormal exit is recorded under <instance dir>/crashes/<time>/
 #    (console log, crash report, watchdog log). The 10 newest are kept.
 #  - Exit status: 0 = stopped on purpose (guest powered off, `make down`, or
@@ -39,6 +43,11 @@ if [ -n "$old" ] && [ "$old" != $$ ] && ps -o command= -p "$old" 2>/dev/null | g
 fi
 echo $$ > "$D/run.pid"
 : > "$D/warnings"
+
+free_gb() { df -k "$D" | awk 'NR == 2 { print int($4 / 1048576) }'; }
+WARN_GB=${ORBIT_WARN_FREE_GB:-10}
+STOP_GB=${ORBIT_STOP_FREE_GB:-3}
+[ "$(free_gb)" -ge "$STOP_GB" ] || fail "only $(free_gb) GB free on the Mac disk (need ${STOP_GB}+)"
 
 # Crash-loop guard. A start requested by vmm-up.sh resets the count.
 now=$(date +%s)
@@ -119,10 +128,22 @@ trap stop TERM INT
 watch() {
   # Grace period: the first boot installs packages and can take minutes.
   for _ in $(seq 1 120); do ping_ok && break; kill -0 "$P" 2>/dev/null || return; sleep 5; done
-  local misses=0 last now
+  local misses=0 last now gb warned=0
   last=$(date +%s)
   while kill -0 "$P" 2>/dev/null; do
     sleep 30
+    gb=$(free_gb)
+    if [ "$gb" -lt "$STOP_GB" ]; then
+      log "Mac disk has ${gb} GB free (< ${STOP_GB}); shutting the guest down"
+      notify "Mac disk almost full (${gb} GB free): the VM was shut down to protect its data. Free some space, then make up."
+      ctl shutdown >/dev/null
+      return
+    elif [ "$gb" -lt "$WARN_GB" ]; then
+      [ $warned = 1 ] || { log "Mac disk has ${gb} GB free"; notify "Mac disk is getting full (${gb} GB free). docker system prune frees space."; }
+      warned=1
+    else
+      warned=0
+    fi
     now=$(date +%s)
     # A long gap means the Mac slept; the guest needs a moment after waking.
     [ $((now - last)) -gt 90 ] && misses=0

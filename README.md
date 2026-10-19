@@ -89,6 +89,7 @@ checkout outside your shared directories.
 | `ORBIT_DISK_GB` | `64` | Size of a **new** data disk (sparse file). |
 | `ORBIT_SHARE_ALLOW` | see below | Colon-separated directories that containers may bind-mount. |
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
+| `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac disk free space at which the VM warns you, and at which it shuts down cleanly before its disk fills. |
 | `ORBIT_INSTANCE` | (unset) | Run a separate VM with its own disk and sockets under `~/.orbit/vmm-<name>`. |
 
 ### File sharing
