@@ -1,0 +1,38 @@
+#!/bin/sh
+# docker-proxy wrapper: dockerd runs the first docker-proxy on PATH, and
+# dockerd.sh puts /etc/orbit/bin first. The VMM forwards each published port
+# from the Mac's 127.0.0.1 to this guest's eth0 address, where Docker only
+# answers for 0.0.0.0 publishes. While the proxy for a port published on a
+# specific host IP (`-p 127.0.0.1:8080:80`) runs, DNAT connections for it
+# arriving on eth0 to the container, the way Docker does for 0.0.0.0. Only
+# the Mac's localhost reaches eth0 (slirp NAT), so the port stays as private.
+hip=""; hport=""; cip=""; cport=""; proto=""; prev=""
+for a; do
+  case $prev in
+    -host-ip) hip=$a ;; -host-port) hport=$a ;; -proto) proto=$a ;;
+    -container-ip) cip=$a ;; -container-port) cport=$a ;;
+  esac
+  prev=$a
+done
+num() { case $1 in ""|*[!0-9]*) return 1 ;; esac; }
+ipv4() { case $1 in ""|*[!0-9.]*) return 1 ;; esac; }
+case "$hip" in ""|0.0.0.0|::) exec /usr/bin/docker-proxy "$@" ;; esac
+if [ "$proto" != tcp ] || ! num "$hport" || ! num "$cport" || ! ipv4 "$cip"; then
+  exec /usr/bin/docker-proxy "$@"
+fi
+rule="PREROUTING -i eth0 -m addrtype --dst-type LOCAL -p tcp --dport $hport -j DNAT --to-destination $cip:$cport"
+# shellcheck disable=SC2086 # $rule is split into iptables arguments on purpose
+iptables -w -t nat -I $rule 2>/dev/null
+/usr/bin/docker-proxy "$@" &
+pid=$!
+# The readiness pipe (3) and listening socket (4) belong to the proxy alone:
+# dockerd waits for the pipe to close.
+exec 3>&- 4<&-
+trap 'kill -TERM $pid 2>/dev/null' TERM INT HUP
+while :; do
+  wait $pid; st=$?
+  kill -0 $pid 2>/dev/null || break
+done
+# shellcheck disable=SC2086
+iptables -w -t nat -D $rule 2>/dev/null
+exit "$st"
