@@ -31,6 +31,11 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- A SIGTERM or SIGINT sent to `orbit-vmm` itself no longer kills the VM on the
+  spot. The VMM logs the sender's pid and name to `console.log`, powers the
+  guest off cleanly (30 s at most), then exits as killed by that signal so the
+  supervisor still restarts it. A second signal exits at once. A VM had been
+  lost to a stray SIGTERM whose sender could not be found.
 - `healthcheck.py` checks free space and no longer counts informational
   `orbit-vmm:` lines as errors.
 - Files and directories created, renamed or deleted on the Mac now raise

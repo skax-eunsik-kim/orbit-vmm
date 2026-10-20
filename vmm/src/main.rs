@@ -5,6 +5,7 @@ mod memory;
 mod ports;
 mod pressure;
 mod reclaim;
+mod signals;
 mod slirp;
 mod virtio;
 mod vm; // hvf bindings, GIC, vCPU loop, PSCI, FDT, PL011, boot
@@ -141,5 +142,9 @@ fn main() {
     if let Some(s) = docker_socket(&config) {
         config.cmdline.push_str(&format!(" orbit.dockersock={}", s.display()));
     }
-    std::process::exit(vm::run(config));
+    signals::install(config.vsock.iter().find(|v| v.guest_port == 1025).map(|v| v.path.clone()));
+    let rc = vm::run(config);
+    // Shut down because of a signal: report it as one, so the supervisor
+    // still sees an unexpected stop (and restarts the VM).
+    std::process::exit(signals::received().map_or(rc, |s| 128 + s));
 }
