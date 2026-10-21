@@ -5,11 +5,38 @@
 # and API calls from containers. The image's own CA bundle is kept and the
 # host roots are appended to a per-container copy bind-mounted over it (same mode).
 # Node.js ignores the system store, so NODE_EXTRA_CA_CERTS points at the merged bundle.
+#
+# A build step (BuildKit's `run`) gets a read-write copy of the bundle's whole
+# directory instead. Tools that regenerate the bundle (update-ca-certificates,
+# an apt-get upgrade of ca-certificates) replace it with rename(2), which fails
+# with EBUSY when the file itself is a mount point (#5). runc then runs as a
+# child, and once the step's process has exited (BuildKit passes `--keep`, so the
+# rootfs is still mounted) the directory is written back into the rootfs with the
+# image's own bundle in place of the merged one: the step's changes land in the
+# layer and the host roots don't. A poststop hook would be too late: BuildKit
+# removes the bundle and rootfs before `runc delete`.
 HOST_CA=/etc/orbit/host-ca.pem
-bundle=""; is_create=0; prev=""
+# What a directory holds: names, types, modes, owners, link targets and file
+# contents. Not mtimes: the guest clock can step back, so "newer than" misses changes.
+ca_manifest() { (cd "$1" && { find . -exec stat -c '%n %f %u %g %N' {} +; find . -type f -exec md5sum {} +; } | sort); }
+ca_writeback() { # <bundle> <rootfs>
+  for state in "$1"/orbit-cadir-*.state; do
+    [ -f "$state" ] || continue
+    read -r dir file < "$state"
+    copy=${state%.state}
+    # Nothing changed: leave the rootfs alone, so the layer has no diff.
+    [ "$(ca_manifest "$copy")" = "$(cat "$copy.before")" ] && continue
+    # Bundle untouched by the step: put the image's own back (cp -p keeps its mtime).
+    cmp -s "$copy/$file" "$copy.merged" && cp -p "$copy.orig" "$copy/$file"
+    rm -rf "${2:?}$dir" && cp -a "$copy" "$2$dir"
+  done
+}
+bundle=""; is_create=0; is_run=0; prev=""; rw=0
 for a in "$@"; do
   # `create` from containerd shims, `run` from BuildKit's executor.
   { [ "$a" = create ] || [ "$a" = run ]; } && is_create=1
+  [ "$a" = run ] && is_run=1
+  { [ "$a" = -d ] || [ "$a" = --detach ]; } && is_run=0
   [ "$prev" = --bundle ] || [ "$prev" = -b ] && bundle=$a
   prev=$a
 done
@@ -20,23 +47,40 @@ if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -
   # its root filesystem, so no trace of the host CA ends up in an image that
   # BuildKit commits from a RUN step (the bind mount itself is never captured).
   # Few processes on purpose: this runs in front of every container start.
-  binds=""; n=0
+  binds=""; first=""; n=0
   for path in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do
     [ -f "$root$path" ] && [ ! -L "$root$path" ] || continue
-    n=$((n + 1)); copy="$bundle/orbit-ca-$n.pem"
-    # cp -p keeps the bundle's mode for the copy.
-    cp -p "$root$path" "$copy" && cat $HOST_CA >> "$copy" && binds="$binds $copy $path"
+    n=$((n + 1)); dir=${path%/*}
+    if [ $is_run = 1 ] && [ -d "$root$dir" ] && [ ! -L "$root$dir" ]; then
+      copy="$bundle/orbit-cadir-$n"
+      # cp -a / cp -p keep modes, owners and mtimes.
+      cp -a "$root$dir" "$copy" && cp -p "$root$path" "$copy.orig" &&
+        cat $HOST_CA >> "$copy/${path##*/}" && cp "$copy/${path##*/}" "$copy.merged" &&
+        ca_manifest "$copy" > "$copy.before" &&
+        echo "$dir ${path##*/}" > "$copy.state" && binds="$binds $copy $dir rw" && rw=1
+    else
+      copy="$bundle/orbit-ca-$n.pem"
+      # cp -p keeps the bundle's mode for the copy.
+      cp -p "$root$path" "$copy" && cat $HOST_CA >> "$copy" && binds="$binds $copy $path ro"
+    fi
+    [ -n "$first" ] || first=$path
   done
   if [ -n "$binds" ]; then
     # Node.js ignores the system store; point it at the merged bundle.
     # shellcheck disable=SC2086 # the bundle path and CA paths have no spaces
-    jq --args '
+    jq --arg ca "$first" --args '
       $ARGS.positional as $p
-      | [range(0; $p | length; 2) | {destination: $p[. + 1], type: "bind", source: $p[.], options: ["rbind", "ro"]}] as $m
+      | [range(0; $p | length; 3) | {destination: $p[. + 1], type: "bind", source: $p[.], options: ["rbind", $p[. + 2]]}] as $m
       | .mounts += $m
       | if ([.process.env[]? | startswith("NODE_EXTRA_CA_CERTS=")] | any) then .
-        else .process.env += ["NODE_EXTRA_CA_CERTS=" + $m[0].destination] end' \
+        else .process.env += ["NODE_EXTRA_CA_CERTS=" + $ca] end' \
       $binds < "$bundle/config.json" > "$bundle/config.json.orbit" && mv "$bundle/config.json.orbit" "$bundle/config.json"
   fi
 fi
-exec /usr/bin/runc "$@"
+[ $rw = 1 ] || exec /usr/bin/runc "$@"
+# Foreground child, so stdio and the console socket pass through unchanged; if
+# BuildKit kills this wrapper (it kills runc with SIGKILL), runc dies with it.
+setpriv --pdeathsig KILL /usr/bin/runc "$@"
+rc=$?
+ca_writeback "$bundle" "$root"
+exit $rc
