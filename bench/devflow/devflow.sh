@@ -82,6 +82,13 @@ check "linux/amd64 container" bash -c "${D[*]} run --rm --platform linux/amd64 a
 check "build sample app" "${D[@]}" build -q -t orbittest/app "$HERE/app"
 check "rebuild (cached)" "${D[@]}" build -q -t orbittest/app "$HERE/app"
 
+# 10b. A RUN step that regenerates the CA bundle (apt-get upgrade of ca-certificates
+# does this) must work, and the Mac's roots must stay out of the committed image (#5).
+check "build: RUN regenerates CA bundle" bash -c "printf 'FROM python:3.12-slim\nRUN update-ca-certificates --fresh\n' | ${D[*]} build -q --no-cache -t orbittest/ca -"
+check "build: host CA kept out of image" bash -c "c=\$(${D[*]} create orbittest/ca) && ${D[*]} cp \$c:/etc/ssl/certs/ca-certificates.crt - | tar -xO > '$OUT.ca' && ${D[*]} rm \$c >/dev/null &&
+  python3 -I '$HERE/../../scripts/export-host-ca.py' 2>/dev/null | python3 -I -c \"import re,sys; c=lambda t: set(re.findall(r'-----BEGIN CERTIFICATE-----[^-]+', t)); h=c(sys.stdin.read()); sys.exit(1 if h & c(open('$OUT.ca').read()) else 0)\""
+rm -f "$OUT.ca"
+
 # 11. alembic upgrade head against the compose postgres
 check "alembic upgrade head" "${D[@]}" run --rm --network orbittest_default \
   -e DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/app orbittest/app
@@ -99,5 +106,5 @@ skew=$(python3 -c "print(abs($g - ($t0+$t1)/2) // 1)")
 if python3 -c "import sys; sys.exit(0 if $skew <= 1 else 1)"; then report PASS "guest clock skew" "${skew}s"; else report FAIL "guest clock skew" "${skew}s"; fi
 
 "${C[@]}" down -v >/dev/null 2>&1
-"${D[@]}" rmi orbittest/app >/dev/null 2>&1
+"${D[@]}" rmi orbittest/app orbittest/ca >/dev/null 2>&1
 echo "== $LABEL: $(grep -c ^PASS "$OUT") pass, $(grep -c ^FAIL "$OUT") fail"

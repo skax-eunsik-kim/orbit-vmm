@@ -5,6 +5,21 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Build `RUN` steps that regenerate the CA bundle work again (#5).
+  - `update-ca-certificates`, or an `apt-get upgrade` that updates
+    `ca-certificates`, used to fail with `mv: ... Device or resource busy`.
+    The cause was the bind mount that adds the Mac's roots: it made the bundle
+    file a mount point.
+  - Build steps now get a read-write copy of the bundle's directory. The
+    step's changes are written back into the layer afterwards. The Mac's roots
+    are never written back.
+  - Running containers keep the file mount. Regenerating the bundle inside a
+    running container still fails.
+  - Within one `RUN`, commands after the regeneration no longer see the Mac's
+    roots. Under TLS inspection, put HTTPS downloads in a separate `RUN`.
+
 ### Added
 
 - README: what to check on a macOS version orbit hasn't been tested on

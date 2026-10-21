@@ -127,7 +127,10 @@ Guest pieces:
 
 - `dockerd.sh` writes `daemon.json` (BuildKit GC at 20 GB) and starts dockerd
   with `orbit-runc`. `orbit-runc` is an OCI runtime wrapper that bind-mounts
-  the host's CA bundle into containers.
+  the host's CA bundle into containers. A build `RUN` step gets a read-write
+  copy of the bundle's directory instead, so tools that regenerate the bundle
+  by rename work; once the step exits the directory is written back into the
+  step's rootfs with the image's own bundle, so the host roots never reach a layer.
 - `dns.sh` runs dnsmasq, which answers `host.docker.internal`.
 - `binfmt.sh` registers qemu-x86_64.
 - `memd.sh`: see above.
