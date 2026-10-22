@@ -156,6 +156,21 @@ remove the shared directories themselves.
 - Any process listening on all addresses in the VM gets the same port on the
   Mac's `127.0.0.1`, not only `-p` publishes (as with `--network host`).
 
+### Root certificates (TLS-inspecting proxies)
+
+- `make guest` reads the roots your Mac trusts beyond Apple's built-in set
+  (the ones marked "Always Trust" for SSL, typically a corporate
+  TLS-inspection CA) and builds them into your guest. On a Mac without such
+  roots nothing is added, and containers see their images' own bundles.
+  The repository and releases contain no certificates.
+- Containers and build steps see those roots appended to the image's CA
+  bundle, through a mount. A build step gets a copy of the bundle's
+  directory, so `update-ca-certificates` and `apt-get upgrade` work. Neither
+  writes the Mac's roots into the image.
+- `ORBIT_HOST_CA=0 make guest && make up` builds a guest without them.
+- Your guest (`~/.orbit/guest`) and data disk then hold your organisation's
+  CAs: don't share them outside it.
+
 ## Files
 
 | Path | Contents |
@@ -267,6 +282,12 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
   trims (`fstrim`, every 10 minutes when the VM is quiet, and once after boot),
   so `docker system prune` shows up on the Mac a few minutes later. The image
   never shrinks below what the guest has written but not freed.
+- **Root certificates:** a build step that copies the CA bundle somewhere else
+  (`cp /etc/ssl/certs/ca-certificates.crt /app/`) copies the Mac's roots with
+  it, into the image. Regenerating the bundle works in build steps but not in
+  running containers, and later commands in the same `RUN` don't see the Mac's
+  roots. If something is mounted on the CA directory (`RUN --mount`, `-v`),
+  the roots aren't added there.
 - **Missing pieces:** no installer, GUI, auto-start or Kubernetes.
 
 ## How it works

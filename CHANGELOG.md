@@ -7,6 +7,14 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- Build steps on images with CA bundles in nested directories (both
+  `/etc/ssl/certs/ca-certificates.crt` and `/etc/ssl/ca-bundle.pem`) see the
+  Mac's roots in both again (a regression from #5).
+- A mount on the CA directory (`RUN --mount=...,target=/etc/ssl/certs`, `-v`)
+  is left alone. It used to be hidden by orbit's copy, or the step failed
+  with `make mountpoint ... read-only file system`.
+- `ORBIT_HOST_CA=0 make guest` builds a guest that adds no root certificates.
+  README now explains what is added and where it comes from.
 - Build `RUN` steps that regenerate the CA bundle work again (#5).
   - `update-ca-certificates`, or an `apt-get upgrade` that updates
     `ca-certificates`, used to fail with `mv: ... Device or resource busy`.

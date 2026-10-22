@@ -48,9 +48,14 @@ tar xzf "$WORK/dl/minirootfs.tar.gz" -C "$WORK/root"
 cp "$WORK/dl/linux-virt.apk" "$WORK/root/linux-virt.apk"
 cp -R "$ROOT/guest/." "$WORK/root/"
 # Trust the extra roots the Mac trusts (a corporate TLS-inspection CA), and
-# only those: see export-host-ca.py. The result embeds your organisation's
-# CAs, so never share the built initramfs or data disk outside it.
-python3 -I "$ROOT/scripts/export-host-ca.py" > "$WORK/root/etc/orbit/host-ca.pem"
+# only those: see export-host-ca.py. Nothing is added on a Mac without any.
+# The result embeds your organisation's CAs, so never share the built
+# initramfs or data disk outside it. ORBIT_HOST_CA=0 builds a guest without them.
+if [ "${ORBIT_HOST_CA:-1}" = 0 ]; then
+  : > "$WORK/root/etc/orbit/host-ca.pem"
+else
+  python3 -I "$ROOT/scripts/export-host-ca.py" > "$WORK/root/etc/orbit/host-ca.pem"
+fi
 chmod 755 "$WORK/root/init" "$WORK/root/etc/orbit/"*.sh "$WORK/root/etc/orbit/orbit-runc"
 # A root snapshot saved on the data disk is only reused by the same build.
 { echo "$MINIROOT $KVER"; (cd "$ROOT/guest" && find . -type f | sort | xargs cat); cat "$WORK/root/etc/orbit/host-ca.pem"; } \
