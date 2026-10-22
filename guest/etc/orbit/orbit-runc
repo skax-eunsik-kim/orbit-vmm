@@ -41,17 +41,35 @@ for a in "$@"; do
   prev=$a
 done
 if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -s $HOST_CA ] && command -v jq >/dev/null; then
-  root=$(jq -r '.root.path' "$bundle/config.json")
+  # The rootfs, then the mounts the container already has (one jq).
+  dests=$(jq -r '.root.path, (.mounts[]?.destination)' "$bundle/config.json")
+  root=${dests%%"
+"*}; dests=${dests#*"
+"}
   case "$root" in /*) ;; *) root="$bundle/$root" ;; esac
   # Only bind over CA bundles the image already has: nothing new is created in
   # its root filesystem, so no trace of the host CA ends up in an image that
   # BuildKit commits from a RUN step (the bind mount itself is never captured).
   # Few processes on purpose: this runs in front of every container start.
-  binds=""; first=""; n=0
+  paths=""
   for path in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do
-    [ -f "$root$path" ] && [ ! -L "$root$path" ] || continue
-    n=$((n + 1)); dir=${path%/*}
-    if [ $is_run = 1 ] && [ -d "$root$dir" ] && [ ! -L "$root$dir" ]; then
+    [ -f "$root$path" ] && [ ! -L "$root$path" ] && paths="$paths $path"
+  done
+  binds=""; first=""; n=0
+  for path in $paths; do
+    n=$((n + 1)); dir=${path%/*}; how=dir
+    for d in $dests; do
+      # Something is mounted on the bundle or a directory above it (RUN
+      # --mount, -v): that is the user's, not the image's; leave it alone.
+      case "$path/" in "$d"/*) how="skip" ;; esac
+      # A mount inside the directory would be hidden by a directory bind.
+      case "$d" in "$dir"/*) [ $how = skip ] || how="file" ;; esac
+    done
+    # Another bundle's directory inside this one (/etc/ssl/certs in /etc/ssl):
+    # a directory bind here would hide that one's.
+    for q in $paths; do case "${q%/*}" in "$dir"/*) [ $how = skip ] || how="file" ;; esac; done
+    [ $how = skip ] && continue
+    if [ $is_run = 1 ] && [ $how = dir ] && [ -d "$root$dir" ] && [ ! -L "$root$dir" ]; then
       copy="$bundle/orbit-cadir-$n"
       # cp -a / cp -p keep modes, owners and mtimes.
       cp -a "$root$dir" "$copy" && cp -p "$root$path" "$copy.orig" &&
