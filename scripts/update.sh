@@ -74,12 +74,20 @@ git -C "$SRC" rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "no tag $
 echo "updating $(installed || true) -> $tag (building in $SRC)"
 git -C "$SRC" -c advice.detachedHead=false checkout -q --detach "$tag"
 make -C "$SRC/vmm" build >/dev/null
+# Build the new guest in a staging directory first (sharing the download
+# cache): if a download or the build fails, nothing installed has changed.
+stage="$HOME_DIR/.update-stage"
+rm -rf "$stage"; mkdir -p "$stage" "$HOME_DIR/cache"; ln -s "$HOME_DIR/cache" "$stage/cache"
+ORBIT_HOME="$stage" "$SRC/scripts/fetch-guest.sh" >/dev/null
 rm -rf "$BIN.prev" "$GUEST.prev"
 [ -d "$BIN" ] && cp -Rp "$BIN" "$BIN.prev"
-[ -d "$GUEST" ] && cp -Rp "$GUEST" "$GUEST.prev"
 ORBIT_BIN="$BIN" "$SRC/scripts/install.sh"
 # Older releases' install.sh doesn't write VERSION; this run knows the tag.
-printf 'version=%s\nrepo=%s\n' "$tag" "$(sed -n 's/^repo=//p' "$BIN.prev/VERSION" 2>/dev/null)" > "$BIN/VERSION"
-ORBIT_HOME="$HOME_DIR" "$SRC/scripts/fetch-guest.sh" >/dev/null
+repo=$(sed -n 's/^repo=//p' "$BIN.prev/VERSION" 2>/dev/null || true)
+[ -n "$repo" ] || repo=$(echo "$URL" | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')
+printf 'version=%s\nrepo=%s\n' "$tag" "$repo" > "$BIN/VERSION"
+[ -d "$GUEST" ] && mv "$GUEST" "$GUEST.prev"
+mv "$stage/guest" "$GUEST"
+rm -rf "$stage"
 echo "installed $tag (make rollback goes back)"
 restart
