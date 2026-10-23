@@ -5,6 +5,37 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-23
+
+### Added
+
+- `make update` installs the latest release (or `TO=<tag>`), building it in
+  `~/.orbit/src` and the new guest in a staging directory first, so a failed
+  update changes nothing. `make rollback` swaps back. The VM restarts only
+  with no containers running, or with `NOW=1`. The health check shows one
+  notification per newer release (daily lookup). `~/.orbit/bin/VERSION`
+  records what is installed (#9).
+- `make install` installs the watchdog too (`ORBIT_WATCHDOG=0` skips it).
+  Running it again leaves a running VM alone (it used to shut the VM down);
+  `install-watchdog.sh --reload` applies a changed agent now (#8).
+- `README.ko.md`, and a language selector on top of both READMEs (#8).
+- README: what to check on a macOS version orbit hasn't been tested on
+  (`--reclaim-selftest`, `make devflow`, how Activity Monitor's number
+  relates to what the guest uses).
+
+- Watchdog: `scripts/install-watchdog.sh` installs a launchd agent that
+  restarts the VM after a crash, a guest reboot or panic, or a hang. A hang
+  is three missed control-socket pings; the VMM is aborted first so macOS
+  writes a crash report.
+  - It stops restarting after more than three starts in 10 minutes.
+  - Each unexpected stop is recorded in `crashes/<time>/` with a
+    notification.
+- `scripts/vmm-run.sh` supervises the VM in both modes. `vmm-up.sh --stop`
+  (`make down`) stops it on purpose.
+- The VMM exits with status 3 when the guest asks for a reset (reboot or
+  kernel panic) instead of 0.
+- `console.log` from the previous run is kept as `console.prev.log`.
+
 ### Fixed
 
 - `make guest` works again on a Mac without a cached kernel: Alpine removed
@@ -43,42 +74,6 @@ All notable changes are listed here. The format follows
     running container still fails.
   - Within one `RUN`, commands after the regeneration no longer see the Mac's
     roots. Under TLS inspection, put HTTPS downloads in a separate `RUN`.
-
-### Added
-
-- `make update` installs the latest release (or `TO=<tag>`), building it in
-  `~/.orbit/src` and the new guest in a staging directory first, so a failed
-  update changes nothing. `make rollback` swaps back. The VM restarts only
-  with no containers running, or with `NOW=1`. The health check shows one
-  notification per newer release (daily lookup). `~/.orbit/bin/VERSION`
-  records what is installed (#9).
-- `make install` installs the watchdog too (`ORBIT_WATCHDOG=0` skips it).
-  Running it again leaves a running VM alone (it used to shut the VM down);
-  `install-watchdog.sh --reload` applies a changed agent now (#8).
-- `README.ko.md`, and a language selector on top of both READMEs (#8).
-- README: what to check on a macOS version orbit hasn't been tested on
-  (`--reclaim-selftest`, `make devflow`, how Activity Monitor's number
-  relates to what the guest uses).
-
-### Disk
-
-- The build cache cap works again. Docker 28+ reads `defaultKeepStorage`
-  as a reserved floor, not a cap, so the cache grew without limit (33 GB
-  seen). daemon.json now sets `defaultMaxUsedSpace` 20 GB,
-  `defaultMinFreeSpace` 10 GB and `defaultReservedSpace` 2 GB.
-- Disk guard in the supervisor:
-  - Below `ORBIT_WARN_FREE_GB` (10) free on the Mac you get a notification.
-  - Below `ORBIT_STOP_FREE_GB` (3) the guest shuts down cleanly and stays
-    down. A full Mac disk corrupted a guest's ext4 in testing.
-  - The VM doesn't start below that threshold either.
-- Disk guard in the VMM, a last resort under the supervisor's: on ENOSPC or
-  below `ORBIT_DISK_FLOOR_MIB` (1 GiB) free it holds guest disk writes (for up
-  to 10 minutes) instead of failing them, and resumes once space is freed, so
-  ext4 never sees write errors. It logs to `console.log` at the supervisor's
-  warning level (`ORBIT_WARN_FREE_GB`). `vmm-up.sh` prints the data disk's
-  real and logical size.
-
-### Fixed
 
 - A SIGTERM or SIGINT sent to `orbit-vmm` itself no longer kills the VM on the
   spot. The VMM logs the sender's pid and name to `console.log`, powers the
@@ -153,6 +148,24 @@ A metadata-heavy bind-mount workload is 10–20x faster:
 - `ORBIT_GUEST` picks the kernel/initramfs directory, so a second instance
   can boot a guest built elsewhere.
 
+### Disk
+
+- The build cache cap works again. Docker 28+ reads `defaultKeepStorage`
+  as a reserved floor, not a cap, so the cache grew without limit (33 GB
+  seen). daemon.json now sets `defaultMaxUsedSpace` 20 GB,
+  `defaultMinFreeSpace` 10 GB and `defaultReservedSpace` 2 GB.
+- Disk guard in the supervisor:
+  - Below `ORBIT_WARN_FREE_GB` (10) free on the Mac you get a notification.
+  - Below `ORBIT_STOP_FREE_GB` (3) the guest shuts down cleanly and stays
+    down. A full Mac disk corrupted a guest's ext4 in testing.
+  - The VM doesn't start below that threshold either.
+- Disk guard in the VMM, a last resort under the supervisor's: on ENOSPC or
+  below `ORBIT_DISK_FLOOR_MIB` (1 GiB) free it holds guest disk writes (for up
+  to 10 minutes) instead of failing them, and resumes once space is freed, so
+  ext4 never sees write errors. It logs to `console.log` at the supervisor's
+  warning level (`ORBIT_WARN_FREE_GB`). `vmm-up.sh` prints the data disk's
+  real and logical size.
+
 ### Security
 
 - The supervisor and `vmm-up.sh` talk to the guest control socket only
@@ -162,23 +175,6 @@ A metadata-heavy bind-mount workload is 10–20x faster:
 - One supervisor per instance. `make down` can't race a restart.
 - `vmm-up.sh` prints warnings, such as running the VMM from a shared
   directory, to the terminal again.
-
-### Added
-
-- Watchdog: `scripts/install-watchdog.sh` installs a launchd agent that
-  restarts the VM after a crash, a guest reboot or panic, or a hang. A hang
-  is three missed control-socket pings; the VMM is aborted first so macOS
-  writes a crash report.
-  - It stops restarting after more than three starts in 10 minutes.
-  - Each unexpected stop is recorded in `crashes/<time>/` with a
-    notification.
-- `scripts/vmm-run.sh` supervises the VM in both modes. `vmm-up.sh --stop`
-  (`make down`) stops it on purpose.
-- The VMM exits with status 3 when the guest asks for a reset (reboot or
-  kernel panic) instead of 0.
-- `console.log` from the previous run is kept as `console.prev.log`.
-
-### Security
 
 - Run the VMM, `vmm-up.sh` and the health check from an installed copy in
   `~/.orbit/bin` (`make install`), not from the checkout. Containers can
