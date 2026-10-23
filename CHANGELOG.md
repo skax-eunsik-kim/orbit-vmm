@@ -7,6 +7,16 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- `make guest` works again on a Mac without a cached kernel: Alpine removed
+  the pinned `linux-virt-6.18.56-r0` from its mirrors (404). Pinned to
+  6.18.58-r0. A weekly CI job now checks that both pinned downloads still
+  exist.
+- Parallel builds no longer fail with `Temporary failure in name resolution`.
+  The guest's dnsmasq let at most 150 uncached queries be in flight and
+  answered every extra one with SERVFAIL. With 200 parallel lookups of new
+  names, 708 of 800 failed; now none do (#10). TLS and TCP timeouts seen in
+  the same builds also happened on the Mac itself: they come from the network,
+  not orbit.
 - The health check no longer reports UNHEALTHY all day for fd count. The
   directory-fd cache kept expired fds open until it reached 1024 entries; it
   now closes them on the next insert (#8).
