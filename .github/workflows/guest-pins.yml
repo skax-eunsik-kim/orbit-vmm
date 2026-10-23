@@ -1,0 +1,30 @@
+name: Guest pins
+
+# Alpine drops old package versions from its mirrors, and then `make guest`
+# fails for anyone without a cached copy (linux-virt 6.18.56-r0 vanished this
+# way). This checks weekly, and on changes to the pins, that both pinned
+# downloads still exist, so the pin gets bumped before users hit it.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  pull_request:
+    paths: [scripts/fetch-guest.sh, .github/workflows/guest-pins.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Pinned Alpine downloads still exist
+        run: |
+          eval "$(grep -E '^(BRANCH|MINIROOT|KVER)=' scripts/fetch-guest.sh)"
+          M=https://dl-cdn.alpinelinux.org/alpine
+          for url in "$M/$BRANCH/releases/aarch64/$MINIROOT" "$M/$BRANCH/main/aarch64/linux-virt-$KVER.apk"; do
+            if curl -fsIL --retry 3 "$url" >/dev/null; then echo "ok  $url"
+            else echo "::error::gone: $url (bump the pin in scripts/fetch-guest.sh)"; exit 1; fi
+          done

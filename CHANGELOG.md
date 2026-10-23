@@ -7,6 +7,10 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- `make guest` works again on a Mac without a cached kernel: Alpine removed
+  the pinned `linux-virt-6.18.56-r0` from its mirrors (404). Pinned to
+  6.18.58-r0. A weekly CI job now checks that both pinned downloads still
+  exist.
 - Build steps on images with CA bundles in nested directories (both
   `/etc/ssl/certs/ca-certificates.crt` and `/etc/ssl/ca-bundle.pem`) see the
   Mac's roots in both again (a regression from #5).
