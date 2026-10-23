@@ -36,6 +36,12 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `make update` installs the latest release (or `TO=<tag>`), building it in
+  `~/.orbit/src` and the new guest in a staging directory first, so a failed
+  update changes nothing. `make rollback` swaps back. The VM restarts only
+  with no containers running, or with `NOW=1`. The health check shows one
+  notification per newer release (daily lookup). `~/.orbit/bin/VERSION`
+  records what is installed (#9).
 - `make install` installs the watchdog too (`ORBIT_WATCHDOG=0` skips it).
   Running it again leaves a running VM alone (it used to shut the VM down);
   `install-watchdog.sh --reload` applies a changed agent now (#8).

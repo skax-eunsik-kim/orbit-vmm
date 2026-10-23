@@ -222,10 +222,23 @@ and losing it is how a full Mac disk corrupts the guest.
 ## Upgrading
 
 ```bash
-git pull && make guest install up
+make update            # the latest release; TO=v0.2.1 for a given one
+make rollback          # back to what was installed before the last update
 ```
 
-The first boot after a guest upgrade reinstalls guest packages (about 1 min).
+`make update` builds the release in its own clone (`~/.orbit/src`), not in
+your checkout, and builds the new guest before replacing anything, so a failed
+download or build leaves the installed version as it was. It keeps the
+previous binaries and guest for `make rollback`. It restarts the VM only when
+no containers are running; otherwise the VM keeps the old version until
+`make up` (or run `NOW=1 make update`). The first boot after a guest upgrade
+reinstalls guest packages (about 1 min).
+
+If the health check is installed, it looks up the latest release once a day
+and shows one macOS notification per newer release. Nothing is installed
+without `make update`.
+
+To follow `main` instead of releases: `git pull && make guest install up`.
 
 ## Watchdog
 
