@@ -75,3 +75,17 @@ Paste the result lines into the PR description.
 orbit-vmm is Apache-2.0. Contributions are accepted under the same licence
 (inbound = outbound, Apache-2.0 §5). No CLA is required. Never commit built
 guest images, data disks, or certificates.
+
+## README translations
+
+`README.md` is the source of truth. `README.<lang>.md` files are translations
+(Korean, Japanese, Simplified Chinese, Spanish, Brazilian Portuguese, French,
+German, Hindi), each with a note that the English version wins.
+
+- When you change `README.md`, update the translations you can, or say in the
+  PR which ones now lag. CI warns about each translation a PR leaves behind.
+- Keep code blocks, commands, paths and numbers exactly as in `README.md`, and
+  point in-page links at the translated heading's GitHub anchor.
+- To add a language, add it to `LANGS` in `scripts/readme-langs.py` and run
+  the script: it writes the language selector into every README.
+

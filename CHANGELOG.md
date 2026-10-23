@@ -5,6 +5,13 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- README in Japanese, Simplified Chinese, Spanish, Brazilian Portuguese,
+  French, German and Hindi, next to English and Korean, with one language
+  selector on all of them (`scripts/readme-langs.py`). CI checks the selector
+  and warns when a PR changes `README.md` but leaves a translation behind.
+
 ## [0.2.1] - 2026-10-23
 
 ### Fixed

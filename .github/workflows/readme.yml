@@ -1,0 +1,24 @@
+name: README translations
+
+# README.md is the source of truth. The language selector must be the same in
+# every README (scripts/readme-langs.py writes it), and a PR that changes
+# README.md without touching a translation gets a warning on that file.
+on:
+  pull_request:
+    paths: ["README*.md", scripts/readme-langs.py, .github/workflows/readme.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  readme:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Language selector is current
+        run: python3 scripts/readme-langs.py --check
+      - name: Translations kept up with README.md
+        run: python3 scripts/readme-langs.py --stale "origin/${{ github.base_ref }}"

@@ -1,6 +1,8 @@
 # orbit-vmm
 
-[English](README.md) | **한국어**
+[English](README.md) | **한국어** | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [हिन्दी](README.hi.md)
+
+> 번역본입니다. 기준은 영어 [README.md](README.md)이며, 내용이 다르면 영어판을 따르세요.
 
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
