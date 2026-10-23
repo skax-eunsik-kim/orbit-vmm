@@ -5,6 +5,13 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The health check's release notice works behind a shared company egress
+  address. It used the unauthenticated GitHub REST API, whose 60 calls an
+  hour per IP were already used up there (403); it now reads the tag from the
+  `releases/latest` page redirect.
+
 ## [0.2.0] - 2026-10-23
 
 ### Added
