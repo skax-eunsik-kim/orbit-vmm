@@ -5,6 +5,22 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Docs
+
+- `docs/architecture.md` describes the current design again: the data disk
+  (discard, disk guard), signals, the directory-fd cache, Docker-event port
+  forwarding, DNS, the CA wrapper's build-step handling, and the Mac-side
+  supervisor, health check and updates.
+- Architecture and benchmarks are translated into the same eight languages as
+  the README. All translations moved from the repository root to
+  `docs/i18n/<lang>/`, with one language selector on every document
+  (`scripts/readme-langs.py`).
+- Each top-level directory (`bench/`, `docs/`, `guest/`, `scripts/`, `vmm/`)
+  has a README listing what is in it.
+- CI checks every relative link and in-page anchor in the Markdown
+  (`scripts/check-doc-links.py`).
+- The README no longer has the "not affiliated with" sentence.
+
 ### Added
 
 - README in Japanese, Simplified Chinese, Spanish, Brazilian Portuguese,

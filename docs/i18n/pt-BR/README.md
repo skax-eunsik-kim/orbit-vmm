@@ -1,11 +1,11 @@
 # orbit-vmm
 
-[English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | **Português (Brasil)** | [Français](README.fr.md) | [Deutsch](README.de.md) | [हिन्दी](README.hi.md)
+[English](../../../README.md) | [한국어](../ko/README.md) | [日本語](../ja/README.md) | [简体中文](../zh-CN/README.md) | [Español](../es/README.md) | **Português (Brasil)** | [Français](../fr/README.md) | [Deutsch](../de/README.md) | [हिन्दी](../hi/README.md)
 
-> Esta é uma tradução. O [README em inglês](README.md) é a fonte oficial; se houver divergência, siga a versão em inglês.
+> Esta é uma tradução. O [README em inglês](../../../README.md) é a fonte oficial; se houver divergência, siga a versão em inglês.
 
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
 
 Um engine Docker econômico em memória para Macs com Apple Silicon.
 
@@ -30,7 +30,7 @@ devolvida.
 - **A memória volta para o macOS.** Free page reporting com granularidade de
   16 KiB, além do corte do page cache ocioso. Depois que uma carga de trabalho
   termina, o footprint da VM no Mac cai de volta para cerca de 1 GB em menos de
-  um minuto ([benchmarks](docs/benchmarks.md)).
+  um minuto ([benchmarks](benchmarks.md)).
 - **Bind mounts via virtio-fs.** `-v $PWD:/app` funciona no mesmo caminho que
   no Mac. Há várias filas de requisições, cache de atributos e readdirplus.
   Edições no Mac, novos arquivos e diretórios, renomeações e exclusões disparam
@@ -87,7 +87,7 @@ confiar nele:
    macOS é uma mudança na forma como o macOS contabiliza, não um vazamento,
    desde que `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` mostrem o VMM retendo
    aproximadamente o que o guest usa (veja
-   [docs/architecture.md](docs/architecture.md)).
+   [docs/architecture.md](architecture.md)).
 
 ## Início rápido
 
@@ -197,7 +197,7 @@ próprios diretórios compartilhados.
 
 **Não compartilhe `~/.orbit/guest/*` nem `data.img`.** Eles contêm binários
 GPL e os certificados raiz confiáveis da sua máquina
-([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+([THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)).
 
 Para aumentar o disco de dados, pare a VM, aumente o arquivo e inicie a VM
 novamente. O guest redimensiona o sistema de arquivos na inicialização:
@@ -334,7 +334,7 @@ volta para a cada hora. Para removê-lo, execute `--uninstall`.
 
 ## Como funciona
 
-Veja [docs/architecture.md](docs/architecture.md). Em resumo:
+Veja [docs/architecture.md](architecture.md). Em resumo:
 
 ```
 docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
@@ -346,15 +346,12 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 ## Contribuindo
 
 Relatos de bugs e pull requests são bem-vindos. Veja o
-[CONTRIBUTING.md](CONTRIBUTING.md) para a configuração do ambiente de
+[CONTRIBUTING.md](../../../CONTRIBUTING.md) para a configuração do ambiente de
 desenvolvimento e as verificações. Reporte problemas de segurança de forma
-privada ([SECURITY.md](SECURITY.md)).
+privada ([SECURITY.md](../../../SECURITY.md)).
 
 ## Licença
 
-Apache-2.0 ([LICENSE](LICENSE)). A imagem do guest que você gera baixa pacotes
+Apache-2.0 ([LICENSE](../../../LICENSE)). A imagem do guest que você gera baixa pacotes
 do Alpine Linux, que têm as próprias licenças; veja
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-O orbit-vmm é um projeto independente. Ele não é afiliado à Docker, Inc., à
-OrbStack nem à Apple.
+[THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md).
