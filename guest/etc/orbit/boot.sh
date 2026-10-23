@@ -73,14 +73,19 @@ else
   grep -q '^@docker ' /etc/apk/repositories \
     || sed -n 's|^\(.*/alpine/\)v[0-9.]*/main$|@docker \1v3.23/community|p' /etc/apk/repositories | head -1 >> /etc/apk/repositories
   # Served from /data/apk-cache after the first boot, so later boots work offline.
-  apk add -q docker@docker docker-engine@docker docker-cli@docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq qemu-x86_64 > /dev/hvc0 2>&1 || log "apk add failed"
+  apk add -q docker@docker docker-engine@docker docker-cli@docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq qemu-x86_64 > /dev/hvc0 2>&1 && pkgs=ok || log "apk add failed"
   # ca-certificates (pulled in by docker) regenerates the bundle; persist the host roots through it.
   cp /etc/orbit/host-ca.pem /usr/local/share/ca-certificates/host-ca.crt
   update-ca-certificates >/dev/null 2>&1
   grep -q "$(sed -n 2p /etc/orbit/host-ca.pem)" /etc/ssl/certs/ca-certificates.crt \
     || cat /etc/orbit/host-ca.pem >> /etc/ssl/certs/ca-certificates.crt
   resize2fs /dev/vda >/dev/null 2>&1  # first boot: e2fsprogs only now exists
-  /etc/orbit/snapshot.sh && log "saved read-only root snapshot for next boot"
+  # Only a complete install is worth keeping; otherwise the next boot retries.
+  if [ "${pkgs:-}" = ok ] && command -v dockerd >/dev/null; then
+    /etc/orbit/snapshot.sh && log "saved read-only root snapshot for next boot"
+  else
+    log "packages incomplete (offline? proxy?): no root snapshot saved; the next boot retries"
+  fi
 fi
 
 # Compressed swap in RAM: under memory pressure the guest swaps cold pages
