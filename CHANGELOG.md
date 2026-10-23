@@ -17,6 +17,12 @@ All notable changes are listed here. The format follows
   names, 708 of 800 failed; now none do (#10). TLS and TCP timeouts seen in
   the same builds also happened on the Mac itself: they come from the network,
   not orbit.
+- The health check no longer reports UNHEALTHY all day for fd count. The
+  directory-fd cache kept expired fds open until it reached 1024 entries; it
+  now closes them on the next insert (#8).
+- `console.log` no longer repeats `macOS memory pressure is warn/normal`
+  dozens of times: a change is logged at most every 10 minutes, with the
+  number of changes in between. The guest is still told every time (#8).
 - Build steps on images with CA bundles in nested directories (both
   `/etc/ssl/certs/ca-certificates.crt` and `/etc/ssl/ca-bundle.pem`) see the
   Mac's roots in both again (a regression from #5).
@@ -40,6 +46,10 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `make install` installs the watchdog too (`ORBIT_WATCHDOG=0` skips it).
+  Running it again leaves a running VM alone (it used to shut the VM down);
+  `install-watchdog.sh --reload` applies a changed agent now (#8).
+- `README.ko.md`, and a language selector on top of both READMEs (#8).
 - README: what to check on a macOS version orbit hasn't been tested on
   (`--reclaim-selftest`, `make devflow`, how Activity Monitor's number
   relates to what the guest uses).

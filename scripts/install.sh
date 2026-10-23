@@ -16,3 +16,9 @@ for f in "$REL/orbit-vmm" "$REL/liborbitclose.dylib" "$ROOT/scripts/vmm-up.sh" "
   mv -f "$BIN/.$(basename "$f").new" "$BIN/$(basename "$f")"
 done
 echo "installed to $BIN"
+# The watchdog restarts a VM that crashes or hangs, and starts it at login.
+# Only for the default install: a test install (ORBIT_BIN=...) must not take
+# over the launchd agent. ORBIT_WATCHDOG=0 skips it.
+if [ "$BIN" = "$HOME/.orbit/bin" ] && [ "${ORBIT_WATCHDOG:-1}" != 0 ]; then
+  "$ROOT/scripts/install-watchdog.sh"
+fi

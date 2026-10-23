@@ -3,7 +3,10 @@
 # restarts it when it crashes or hangs (see vmm-run.sh). With it installed,
 # vmm-up.sh starts the VM through launchd, and a VM that was running when you
 # logged out starts again at login. `vmm-up.sh --stop` / `make down` stop it
-# for good. ORBIT_INSTANCE selects the instance.
+# for good. ORBIT_INSTANCE selects the instance. `make install` runs this.
+# Re-running it leaves a running VM alone: launchd reads the plist when the
+# agent is loaded, so a changed one takes effect at the next login, or now
+# with --reload (which shuts the VM down and lets vmm-up.sh start it again).
 set -eu
 LABEL="com.orbit.vmm${ORBIT_INSTANCE:+.$ORBIT_INSTANCE}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -20,7 +23,8 @@ fi
 
 [ -x "$RUN" ] || { echo "run make install first" >&2; exit 1; }
 mkdir -p "$HOME/Library/LaunchAgents" "$D"
-cat > "$PLIST" <<PLIST
+NEW="$PLIST.new"
+cat > "$NEW" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -43,6 +47,14 @@ cat > "$PLIST" <<PLIST
 </dict>
 </plist>
 PLIST
+if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 && [ "${1:-}" != --reload ]; then
+  # Loaded already. Unloading would shut the VM down, so only swap the file.
+  if cmp -s "$NEW" "$PLIST"; then rm -f "$NEW"; echo "$LABEL is already installed"; exit 0; fi
+  mv -f "$NEW" "$PLIST"
+  echo "updated $PLIST; it takes effect at the next login, or now with $0 --reload (restarts the VM)"
+  exit 0
+fi
+mv -f "$NEW" "$PLIST"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "installed $LABEL; start the VM with make up (log: $D/watchdog.log, crashes: $D/crashes)"
