@@ -78,6 +78,7 @@ make -C "$SRC/vmm" build >/dev/null
 # cache): if a download or the build fails, nothing installed has changed.
 stage="$HOME_DIR/.update-stage"
 rm -rf "$stage"; mkdir -p "$stage" "$HOME_DIR/cache"; ln -s "$HOME_DIR/cache" "$stage/cache"
+trap 'rm -rf "$stage"' EXIT
 ORBIT_HOME="$stage" "$SRC/scripts/fetch-guest.sh" >/dev/null
 rm -rf "$BIN.prev" "$GUEST.prev"
 [ -d "$BIN" ] && cp -Rp "$BIN" "$BIN.prev"
@@ -88,6 +89,5 @@ repo=$(sed -n 's/^repo=//p' "$BIN.prev/VERSION" 2>/dev/null || true)
 printf 'version=%s\nrepo=%s\n' "$tag" "$repo" > "$BIN/VERSION"
 [ -d "$GUEST" ] && mv "$GUEST" "$GUEST.prev"
 mv "$stage/guest" "$GUEST"
-rm -rf "$stage"
 echo "installed $tag (make rollback goes back)"
 restart
