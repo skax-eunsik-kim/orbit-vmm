@@ -7,6 +7,11 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `AGENTS.md` (and a `CLAUDE.md` that imports it): rules for coding agents on
+  verifying changes in an isolated instance, known traps, docs and releases.
+
+### Added
+
 - README in Japanese, Simplified Chinese, Spanish, Brazilian Portuguese,
   French, German and Hindi, next to English and Korean, with one language
   selector on all of them (`scripts/readme-langs.py`). CI checks the selector
