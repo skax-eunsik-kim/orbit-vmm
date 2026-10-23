@@ -330,16 +330,17 @@ def update_notice(state, now):
             info[k] = v
     except OSError:
         return True
+    # Not the REST API: unauthenticated it allows 60 calls an hour per IP, which
+    # a company's shared egress address uses up (seen: 403, 0 remaining). The
+    # web page redirects to the latest release's tag with no such limit.
     url = os.environ.get("ORBIT_RELEASES_URL") or (
-        f"https://api.github.com/repos/{info['repo']}/releases/latest" if info.get("repo") else "")
+        f"https://github.com/{info['repo']}/releases/latest" if info.get("repo") else "")
     if not url:
         return True
     # /usr/bin/curl uses the macOS trust store, so it works behind TLS inspection.
-    out = subprocess.run(["/usr/bin/curl", "-fsSL", "--max-time", "10", url], capture_output=True, text=True)
-    try:
-        latest = json.loads(out.stdout).get("tag_name", "")
-    except ValueError:
-        return True
+    out = subprocess.run(["/usr/bin/curl", "-sS", "-o", "/dev/null", "--max-time", "10",
+                          "-w", "%{redirect_url}", url], capture_output=True, text=True)
+    latest = out.stdout.strip().rsplit("/tag/", 1)[-1] if "/tag/" in out.stdout else ""
     if semver(latest) > semver(info.get("version")) and state.get("update_notified") != latest:
         notify(f"{latest} is available (installed: {info.get('version', '?')}). Run make update.")
         state["update_notified"] = latest
