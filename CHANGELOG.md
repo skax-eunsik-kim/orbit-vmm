@@ -5,6 +5,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-23
+
 ### Fixed
 
 - The health check's release notice works behind a shared company egress
