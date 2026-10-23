@@ -15,7 +15,13 @@ for f in "$REL/orbit-vmm" "$REL/liborbitclose.dylib" "$ROOT/scripts/vmm-up.sh" "
   install -m 700 "$f" "$BIN/.$(basename "$f").new"
   mv -f "$BIN/.$(basename "$f").new" "$BIN/$(basename "$f")"
 done
-echo "installed to $BIN"
+# What was installed, for make update / make rollback and the health check's
+# update notice: the release tag (or commit) and the GitHub repository.
+{
+  echo "version=$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+  echo "repo=$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
+} > "$BIN/VERSION"
+echo "installed $(sed -n 's/^version=//p' "$BIN/VERSION") to $BIN"
 # The watchdog restarts a VM that crashes or hangs, and starts it at login.
 # Only for the default install: a test install (ORBIT_BIN=...) must not take
 # over the launchd agent. ORBIT_WATCHDOG=0 skips it.

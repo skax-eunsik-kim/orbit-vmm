@@ -12,6 +12,10 @@ does work when due. Interval starts at 1 h, doubles to 2 h and then 4 h after 3
 healthy runs in a row, and drops back to 1 h on any failure or warning
 (including resource growth: threads/fds far above the first run's baseline).
 
+Once a day it also looks up the latest GitHub release of the installed
+repository (~/.orbit/bin/VERSION, written by install.sh) and shows one macOS
+notification per newer release. It never installs anything: make update does.
+
 Usage: healthcheck.py [--force] [--instance NAME]
 Exit status: 0 healthy or not due, 1 unhealthy.
 """
@@ -27,6 +31,7 @@ import secrets
 import time
 
 INTERVALS_H = [1, 2, 4]
+UPDATE_EVERY_S = 24 * 3600
 STREAK_TO_GROW = 3
 # The bind-mount probe needs a scratch directory inside a shared directory:
 # ORBIT_HEALTH_DIR's parent, or by default the first shared directory the VM
@@ -299,6 +304,48 @@ def console_errors(inst_dir, state):
     return [l.strip()[:160] for l in new.splitlines() if any(b in l for b in bad)][:20]
 
 
+def semver(v):
+    """(major, minor, patch) of a tag or `git describe` output, (0, 0, 0) if none."""
+    import re
+    m = re.match(r"v(\d+)\.(\d+)\.(\d+)", v or "")
+    return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+
+
+def notify(text):
+    # Text goes in as an argument, never into the AppleScript source.
+    subprocess.run(["osascript", "-e", "on run argv", "-e",
+                    "display notification (item 1 of argv) with title (item 2 of argv)", "-e", "end run",
+                    text, "orbit-vmm"], capture_output=True, timeout=10)
+
+
+def update_notice(state, now):
+    """Notifies once per release newer than the installed one. Returns True if state changed."""
+    if now - state.get("update_checked", 0) < UPDATE_EVERY_S:
+        return False
+    state["update_checked"] = now
+    info = {}
+    try:
+        for line in open(os.path.expanduser(os.environ.get("ORBIT_BIN", "~/.orbit/bin")) + "/VERSION"):
+            k, _, v = line.strip().partition("=")
+            info[k] = v
+    except OSError:
+        return True
+    url = os.environ.get("ORBIT_RELEASES_URL") or (
+        f"https://api.github.com/repos/{info['repo']}/releases/latest" if info.get("repo") else "")
+    if not url:
+        return True
+    # /usr/bin/curl uses the macOS trust store, so it works behind TLS inspection.
+    out = subprocess.run(["/usr/bin/curl", "-fsSL", "--max-time", "10", url], capture_output=True, text=True)
+    try:
+        latest = json.loads(out.stdout).get("tag_name", "")
+    except ValueError:
+        return True
+    if semver(latest) > semver(info.get("version")) and state.get("update_notified") != latest:
+        notify(f"{latest} is available (installed: {info.get('version', '?')}). Run make update.")
+        state["update_notified"] = latest
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
@@ -314,6 +361,10 @@ def main():
     now = time.time()
     if a.record:
         a.force = True
+    if not a.record and not a.instance and update_notice(state, now):
+        tmp = state_path + ".tmp"
+        json.dump(state, open(tmp, "w"))
+        os.replace(tmp, state_path)
     if not a.force and now < state.get("next_due", 0):
         return 0
 

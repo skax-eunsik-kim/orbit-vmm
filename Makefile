@@ -3,7 +3,7 @@ SHELL := /bin/bash
 DOCKER_SOCK := unix://$(HOME)/.orbit/vmm/docker.sock
 SH_FILES := $(shell git ls-files '*.sh' guest/init 'guest/etc/orbit/*' 'vmm/guest/init-*' | grep -v '\.py$$' | sort -u)
 
-.PHONY: help guest build install up down test lint fmt devflow clean
+.PHONY: help guest build install up down update rollback test lint fmt devflow clean
 
 help:
 	@echo "make guest    download + build the guest kernel/initramfs (~/.orbit/guest)"
@@ -11,6 +11,8 @@ help:
 	@echo "make install  build, copy the VMM and scripts to ~/.orbit/bin (outside shared dirs), install the watchdog"
 	@echo "make up       (re)start the VM from ~/.orbit/bin (builds nothing)"
 	@echo "make down     shut the VM down (the watchdog won't restart it)"
+	@echo "make update   install the latest release (TO=<tag>; NOW=1 restarts even with containers running)"
+	@echo "make rollback go back to the version installed before the last update"
 	@echo "make lint     cargo fmt --check, clippy -D warnings, shellcheck"
 	@echo "make test     cargo test"
 	@echo "make devflow  run the developer-workflow checks against the running VM"
@@ -32,6 +34,14 @@ up:
 
 down:
 	$(HOME)/.orbit/bin/vmm-up.sh --stop
+
+# Builds the latest release (or TO=<tag>) in ~/.orbit/src, not here. NOW=1
+# restarts the VM even if containers are running.
+update:
+	./scripts/update.sh $(if $(TO),--to $(TO)) $(if $(NOW),--now)
+
+rollback:
+	./scripts/update.sh --rollback $(if $(NOW),--now)
 
 test:
 	cd vmm && cargo test

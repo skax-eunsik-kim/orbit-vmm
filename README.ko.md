@@ -210,10 +210,21 @@ python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(
 ## 업그레이드
 
 ```bash
-git pull && make guest install up
+make update            # 최신 릴리스. 특정 버전은 TO=v0.2.1
+make rollback          # 마지막 업데이트 전에 설치돼 있던 버전으로
 ```
 
-게스트를 업그레이드한 뒤 첫 부팅은 게스트 패키지를 다시 설치합니다(약 1분).
+`make update` 는 여러분의 체크아웃이 아니라 자체 클론(`~/.orbit/src`)에서 릴리스를
+빌드하고, 무엇이든 바꾸기 전에 새 게스트부터 만듭니다. 그래서 다운로드나 빌드가
+실패하면 설치된 버전이 그대로 남습니다. 직전 바이너리와 게스트를 `make rollback` 용으로
+남겨 둡니다. 컨테이너가 하나도 돌지 않을 때만 VM 을 재기동하고, 아니면 `make up` 할
+때까지 VM 이 옛 버전으로 돕니다(`NOW=1 make update` 로 바로 재기동). 게스트를
+업그레이드한 뒤 첫 부팅은 게스트 패키지를 다시 설치합니다(약 1분).
+
+건강 점검을 설치했다면 하루 한 번 최신 릴리스를 확인하고, 새 릴리스마다 macOS 알림을
+한 번 보냅니다. `make update` 없이는 아무것도 설치하지 않습니다.
+
+릴리스 대신 `main` 을 따라가려면: `git pull && make guest install up`.
 
 ## 워치독
 
