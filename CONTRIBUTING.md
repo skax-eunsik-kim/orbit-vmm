@@ -36,7 +36,7 @@ Repository layout:
 | `guest/` | Files baked into the real guest: init, boot scripts, memd, runc wrapper. |
 | `scripts/` | Guest image build, VM start, health check. |
 | `bench/` | Workflow, memory, and stress benchmarks. |
-| `docs/` | Architecture and benchmark notes. |
+| `docs/` | Architecture and benchmark notes; translations in `docs/i18n/<lang>/`. |
 
 ## Checks
 
@@ -78,14 +78,17 @@ guest images, data disks, or certificates.
 
 ## README translations
 
-`README.md` is the source of truth. `README.<lang>.md` files are translations
-(Korean, Japanese, Simplified Chinese, Spanish, Brazilian Portuguese, French,
-German, Hindi), each with a note that the English version wins.
+The English `README.md`, `docs/architecture.md` and `docs/benchmarks.md` are
+the source of truth. Translations live in `docs/i18n/<lang>/` (Korean,
+Japanese, Simplified Chinese, Spanish, Brazilian Portuguese, French, German,
+Hindi), each with a note that the English version wins.
 
-- When you change `README.md`, update the translations you can, or say in the
-  PR which ones now lag. CI warns about each translation a PR leaves behind.
-- Keep code blocks, commands, paths and numbers exactly as in `README.md`, and
-  point in-page links at the translated heading's GitHub anchor.
-- To add a language, add it to `LANGS` in `scripts/readme-langs.py` and run
-  the script: it writes the language selector into every README.
-
+- When you change an English document, update the translations you can, or say
+  in the PR which ones now lag. CI warns about each translation a PR leaves
+  behind.
+- Keep code blocks, commands, paths and numbers exactly as in the English
+  document, and point in-page links at the translated heading's GitHub anchor.
+  `scripts/check-doc-links.py` checks every link and anchor.
+- To add a language, add it to `LANGS` in `scripts/readme-langs.py`, add its
+  files under `docs/i18n/<lang>/`, and run the script: it writes the language
+  selector into every document.

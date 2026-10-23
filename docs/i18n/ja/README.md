@@ -1,11 +1,11 @@
 # orbit-vmm
 
-[English](README.md) | [한국어](README.ko.md) | **日本語** | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [हिन्दी](README.hi.md)
+[English](../../../README.md) | [한국어](../ko/README.md) | **日本語** | [简体中文](../zh-CN/README.md) | [Español](../es/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Français](../fr/README.md) | [Deutsch](../de/README.md) | [हिन्दी](../hi/README.md)
 
-> これは翻訳です。英語版の [README](README.md) が正となる文書です。内容に食い違いがある場合は英語版に従ってください。
+> これは翻訳です。英語版の [README](../../../README.md) が正となる文書です。内容に食い違いがある場合は英語版に従ってください。
 
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
 
 Apple Silicon Mac 向けの、メモリを節約する Docker エンジンです。
 
@@ -28,7 +28,7 @@ orbit-vmm はメモリを返却します。ゲストは解放したページを�
 - **メモリが macOS に戻ります。** 16 KiB 単位の free page reporting に加え、
   アイドル状態のページキャッシュを削減します。ワークロードが終了すると、Mac 上の VM のフットプリントは
   1 分以内に約 1 GB まで戻ります
-  （[ベンチマーク](docs/benchmarks.md)）。
+  （[ベンチマーク](benchmarks.md)）。
 - **virtio-fs によるバインドマウント。** `-v $PWD:/app` は Mac 上と同じパスで動作します。
   複数のリクエストキュー、属性キャッシュ、readdirplus を備えています。
   Mac での編集、新規ファイルやディレクトリの作成、リネーム、削除はコンテナ内で inotify
@@ -80,7 +80,7 @@ macOS へ返却できるか、またアクティビティモニタがそれを�
    ゼロで、メモリ逼迫時には圧縮量の約 3 分の 1 から 2 分の 1 でした。別の macOS
    バージョンで差が異なっていても、
    `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` で VMM がゲストの使用量とほぼ同じ量を保持していると
-   確認できる限り、それはリークではなく macOS の数え方の変化です（[docs/architecture.md](docs/architecture.md) を参照）。
+   確認できる限り、それはリークではなく macOS の数え方の変化です（[docs/architecture.md](architecture.md) を参照）。
 
 ## クイックスタート
 
@@ -186,7 +186,7 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
 
 **`~/.orbit/guest/*` や `data.img` を共有しないでください。** これらには GPL バイナリと
 マシンが信頼するルート証明書が含まれています
-（[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。
+（[THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)）。
 
 データディスクを拡張するには、VM を停止し、ファイルを拡大してから、VM を再び起動します。
 ゲストは起動時にファイルシステムのサイズを変更します:
@@ -313,7 +313,7 @@ fd 数を `~/.orbit/vmm/health.jsonl` に記録します。
 
 ## 仕組み
 
-[docs/architecture.md](docs/architecture.md) を参照してください。概要は次のとおりです:
+[docs/architecture.md](architecture.md) を参照してください。概要は次のとおりです:
 
 ```
 docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
@@ -325,14 +325,11 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 ## コントリビュート
 
 バグ報告やプルリクエストを歓迎します。開発環境のセットアップとチェックについては
-[CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
-セキュリティ上の問題は非公開で報告してください（[SECURITY.md](SECURITY.md)）。
+[CONTRIBUTING.md](../../../CONTRIBUTING.md) を参照してください。
+セキュリティ上の問題は非公開で報告してください（[SECURITY.md](../../../SECURITY.md)）。
 
 ## ライセンス
 
-Apache-2.0（[LICENSE](LICENSE)）。ビルドするゲストイメージは Alpine
+Apache-2.0（[LICENSE](../../../LICENSE)）。ビルドするゲストイメージは Alpine
 Linux のパッケージをダウンロードします。それらには独自のライセンスがあります。
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
-
-orbit-vmm は独立したプロジェクトです。Docker, Inc.、
-OrbStack、Apple とは提携していません。
+[THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md) を参照してください。
