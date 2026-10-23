@@ -1,5 +1,7 @@
 # orbit-vmm
 
+**English** | [한국어](README.ko.md)
+
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -69,7 +71,7 @@ these three things on a new version before relying on it:
    ~257 MiB, freed guest memory isn't returned on this version: the VM only
    grows on the Mac.
 2. **Developer workflow.** With the VM up: `make devflow` must report
-   21 pass, 0 fail.
+   0 fail (25 checks).
 3. **Activity Monitor.** Its Memory column is the VMM's `phys_footprint`.
    When the Mac is short on memory, macOS compresses part of guest RAM and
    that number grows past what the guest uses. In testing the gap was near
@@ -85,7 +87,7 @@ these three things on a new version before relying on it:
 git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/src/orbit-vmm
 cd ~/src/orbit-vmm
 make guest      # download pinned Alpine kernel + rootfs (sha256-checked) into ~/.orbit/guest
-make install    # build, sign, and copy the VMM and scripts to ~/.orbit/bin
+make install    # build, sign, copy the VMM and scripts to ~/.orbit/bin, install the watchdog
 make up         # start the VM from ~/.orbit/bin; first boot installs Docker (~1 min), later boots 2-4 s
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
@@ -225,14 +227,19 @@ git pull && make guest install up
 
 The first boot after a guest upgrade reinstalls guest packages (about 1 min).
 
-## Watchdog (optional)
+## Watchdog
+
+`make install` also installs a launchd agent, `com.orbit.vmm`, that runs the
+VM and recovers it. It is there because nothing else is: orbit has no app that
+stays running, so without it a VMM that dies or hangs stays down.
 
 ```bash
-./scripts/install-watchdog.sh     # after make install; --uninstall removes it
+ORBIT_WATCHDOG=0 make install          # install without it
+./scripts/install-watchdog.sh --uninstall
+./scripts/install-watchdog.sh --reload # apply a changed agent now (restarts the VM)
 ```
 
-This installs a launchd agent, `com.orbit.vmm`, that runs the VM and
-recovers it:
+Installing again leaves a running VM alone.
 
 - **Crash:** if the VMM dies, or the guest reboots or panics, launchd starts
   it again within seconds.
@@ -288,7 +295,7 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
   running containers, and later commands in the same `RUN` don't see the Mac's
   roots. If something is mounted on the CA directory (`RUN --mount`, `-v`),
   the roots aren't added there.
-- **Missing pieces:** no installer, GUI, auto-start or Kubernetes.
+- **Missing pieces:** no installer, GUI or Kubernetes.
 
 ## How it works
 

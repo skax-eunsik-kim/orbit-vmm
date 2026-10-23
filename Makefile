@@ -8,7 +8,7 @@ SH_FILES := $(shell git ls-files '*.sh' guest/init 'guest/etc/orbit/*' 'vmm/gues
 help:
 	@echo "make guest    download + build the guest kernel/initramfs (~/.orbit/guest)"
 	@echo "make build    build and sign vmm/target/release/orbit-vmm"
-	@echo "make install  build, then copy the VMM and scripts to ~/.orbit/bin (outside shared dirs)"
+	@echo "make install  build, copy the VMM and scripts to ~/.orbit/bin (outside shared dirs), install the watchdog"
 	@echo "make up       (re)start the VM from ~/.orbit/bin (builds nothing)"
 	@echo "make down     shut the VM down (the watchdog won't restart it)"
 	@echo "make lint     cargo fmt --check, clippy -D warnings, shellcheck"

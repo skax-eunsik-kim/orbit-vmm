@@ -44,6 +44,9 @@ extern "C" {
 const DISPATCH_MEMORYPRESSURE_ALL: usize = 0x1 | 0x2 | 0x4; // NORMAL | WARN | CRITICAL
 const QOS_CLASS_UTILITY: isize = 0x11;
 
+/// How often a change in macOS memory pressure is logged (the guest is told every time).
+const LOG_EVERY: Duration = Duration::from_secs(600);
+
 static WAKE: OnceLock<SyncSender<()>> = OnceLock::new();
 
 extern "C" fn on_pressure(_ctx: *mut c_void) {
@@ -122,11 +125,27 @@ pub fn spawn(config: &crate::Config) {
         .name("pressure".into())
         .spawn(move || {
             let mut told: Option<&str> = None;
+            // Pressure can flip between warn and normal every few minutes for
+            // hours; the guest hears each change, the log at most one line
+            // per LOG_EVERY with the count of changes in between.
+            let mut logged: Option<std::time::Instant> = None;
+            let mut unlogged = 0u32;
             loop {
                 let now = pinned.unwrap_or_else(level);
                 if (told != Some(now) || now != "normal") && tell(&path, now) {
                     if told.is_some_and(|t| t != now) || (told.is_none() && now != "normal") {
-                        eprintln!("orbit-vmm: macOS memory pressure is {now}, told the guest");
+                        if logged.is_none_or(|t| t.elapsed() >= LOG_EVERY) {
+                            let more = if unlogged > 0 {
+                                format!(" ({unlogged} changes since the last line)")
+                            } else {
+                                String::new()
+                            };
+                            eprintln!("orbit-vmm: macOS memory pressure is {now}, told the guest{more}");
+                            logged = Some(std::time::Instant::now());
+                            unlogged = 0;
+                        } else {
+                            unlogged += 1;
+                        }
                     }
                     told = Some(now);
                 }

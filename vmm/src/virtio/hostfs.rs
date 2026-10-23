@@ -192,13 +192,43 @@ pub struct Root {
     /// just skips one openat per path component (tens of µs each on macOS).
     /// Entries live DIR_CACHE_TTL, so a directory moved on the Mac is
     /// re-walked soon; the guest's own renames and rmdirs drop them at once.
-    dirs: std::sync::Mutex<std::collections::HashMap<PathBuf, (std::sync::Arc<OwnedFd>, std::time::Instant)>>,
+    dirs: std::sync::Mutex<DirCache>,
     /// Directories that are only visible as empty, read-only mount points.
     reveal: Vec<PathBuf>,
 }
 
 const DIR_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
 const DIR_CACHE_MAX: usize = 1024;
+
+/// Directory fds by path, each with the time it was opened. Expired entries
+/// are closed on the next insert (at most once per TTL), so the VMM holds
+/// only what was walked in the last second, not up to DIR_CACHE_MAX stale fds.
+#[derive(Default)]
+struct DirCache {
+    map: std::collections::HashMap<PathBuf, (std::sync::Arc<OwnedFd>, std::time::Instant)>,
+    pruned: Option<std::time::Instant>,
+}
+
+impl DirCache {
+    fn get(&self, k: &Path, now: std::time::Instant) -> Option<std::sync::Arc<OwnedFd>> {
+        self.map.get(k).filter(|(_, t)| now.duration_since(*t) < DIR_CACHE_TTL).map(|(fd, _)| fd.clone())
+    }
+
+    fn insert(&mut self, k: PathBuf, fd: std::sync::Arc<OwnedFd>, now: std::time::Instant) {
+        if self.pruned.is_none_or(|p| now.duration_since(p) >= DIR_CACHE_TTL) {
+            self.map.retain(|_, (_, t)| now.duration_since(*t) < DIR_CACHE_TTL);
+            self.pruned = Some(now);
+        }
+        if self.map.len() >= DIR_CACHE_MAX {
+            self.map.clear();
+        }
+        self.map.insert(k, (fd, now));
+    }
+
+    fn forget(&mut self, p: &Path) {
+        self.map.retain(|k, _| !k.starts_with(p));
+    }
+}
 
 impl Root {
     pub fn open(path: &Path, allow: &[PathBuf]) -> Result<Self, String> {
@@ -328,21 +358,17 @@ impl Root {
     fn dir_fd(&self, p: &Path) -> Result<std::sync::Arc<OwnedFd>, i32> {
         let comps = self.components(p)?;
         let now = std::time::Instant::now();
-        let fresh = |d: &std::collections::HashMap<PathBuf, (std::sync::Arc<OwnedFd>, std::time::Instant)>,
-                     k: &Path| {
-            d.get(k).filter(|(_, t)| now.duration_since(*t) < DIR_CACHE_TTL).map(|(fd, _)| fd.clone())
-        };
         if comps.is_empty() {
             return Ok(self.fd.clone());
         }
-        if let Some(fd) = fresh(&self.dirs.lock().unwrap(), p) {
+        if let Some(fd) = self.dirs.lock().unwrap().get(p, now) {
             return Ok(fd);
         }
         let mut cur = self.fd.clone();
         let mut path = self.path.clone();
         for comp in comps {
             path.push(comp);
-            if let Some(fd) = fresh(&self.dirs.lock().unwrap(), &path) {
+            if let Some(fd) = self.dirs.lock().unwrap().get(&path, now) {
                 cur = fd;
                 continue;
             }
@@ -352,11 +378,7 @@ impl Root {
                 libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
                 0,
             )?);
-            let mut d = self.dirs.lock().unwrap();
-            if d.len() >= DIR_CACHE_MAX {
-                d.clear();
-            }
-            d.insert(path.clone(), (fd.clone(), now));
+            self.dirs.lock().unwrap().insert(path.clone(), fd.clone(), now);
             cur = fd;
         }
         Ok(cur)
@@ -364,7 +386,7 @@ impl Root {
 
     /// Forgets cached directory fds at or below `p` (it was renamed or removed).
     pub fn forget_dirs(&self, p: &Path) {
-        self.dirs.lock().unwrap().retain(|k, _| !k.starts_with(p));
+        self.dirs.lock().unwrap().forget(p);
     }
 
     /// Opens the directory `p` itself as a new fd of its own (for listing).
@@ -539,8 +561,33 @@ pub fn list_dir(dir: &OwnedFd) -> Result<Vec<(u64, u32, Vec<u8>)>, i32> {
 
 #[cfg(test)]
 mod tests {
-    use super::unsafe_share;
+    use super::{unsafe_share, DirCache, DIR_CACHE_TTL};
+    use std::os::fd::{FromRawFd, OwnedFd};
     use std::path::Path;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn dir_fd() -> Arc<OwnedFd> {
+        let fd = unsafe { libc::open(c"/".as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC) };
+        assert!(fd >= 0);
+        Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
+
+    #[test]
+    fn dir_cache_closes_expired_fds_on_the_next_insert() {
+        let t0 = Instant::now();
+        let mut c = DirCache::default();
+        let old: Vec<_> = (0..100).map(|_| dir_fd()).collect();
+        for (i, fd) in old.iter().enumerate() {
+            c.insert(format!("/w/{i}").into(), fd.clone(), t0);
+        }
+        assert!(c.get(Path::new("/w/0"), t0).is_some());
+        let later = t0 + DIR_CACHE_TTL + Duration::from_millis(1);
+        assert!(c.get(Path::new("/w/0"), later).is_none(), "expired entries are not served");
+        c.insert("/w/new".into(), dir_fd(), later);
+        assert_eq!(c.map.len(), 1, "expired entries are dropped");
+        assert!(old.iter().all(|fd| Arc::strong_count(fd) == 1), "and their fds released");
+    }
 
     #[test]
     fn refuses_home_and_sensitive_dirs() {
