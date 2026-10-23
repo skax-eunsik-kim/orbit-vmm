@@ -7,6 +7,12 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- Parallel builds no longer fail with `Temporary failure in name resolution`.
+  The guest's dnsmasq let at most 150 uncached queries be in flight and
+  answered every extra one with SERVFAIL. With 200 parallel lookups of new
+  names, 708 of 800 failed; now none do (#10). TLS and TCP timeouts seen in
+  the same builds also happened on the Mac itself: they come from the network,
+  not orbit.
 - Build steps on images with CA bundles in nested directories (both
   `/etc/ssl/certs/ca-certificates.crt` and `/etc/ssl/ca-bundle.pem`) see the
   Mac's roots in both again (a regression from #5).
