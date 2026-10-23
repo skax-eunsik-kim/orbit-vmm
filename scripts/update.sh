@@ -78,6 +78,8 @@ rm -rf "$BIN.prev" "$GUEST.prev"
 [ -d "$BIN" ] && cp -Rp "$BIN" "$BIN.prev"
 [ -d "$GUEST" ] && cp -Rp "$GUEST" "$GUEST.prev"
 ORBIT_BIN="$BIN" "$SRC/scripts/install.sh"
+# Older releases' install.sh doesn't write VERSION; this run knows the tag.
+printf 'version=%s\nrepo=%s\n' "$tag" "$(sed -n 's/^repo=//p' "$BIN.prev/VERSION" 2>/dev/null)" > "$BIN/VERSION"
 ORBIT_HOME="$HOME_DIR" "$SRC/scripts/fetch-guest.sh" >/dev/null
 echo "installed $tag (make rollback goes back)"
 restart
