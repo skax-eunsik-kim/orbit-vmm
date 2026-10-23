@@ -1,6 +1,6 @@
 # orbit-vmm
 
-**English** | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [हिन्दी](README.hi.md)
+**English** | [한국어](docs/i18n/ko/README.md) | [日本語](docs/i18n/ja/README.md) | [简体中文](docs/i18n/zh-CN/README.md) | [Español](docs/i18n/es/README.md) | [Português (Brasil)](docs/i18n/pt-BR/README.md) | [Français](docs/i18n/fr/README.md) | [Deutsch](docs/i18n/de/README.md) | [हिन्दी](docs/i18n/hi/README.md)
 
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -332,6 +332,3 @@ Report security issues privately ([SECURITY.md](SECURITY.md)).
 Apache-2.0 ([LICENSE](LICENSE)). The guest image you build downloads Alpine
 Linux packages, which carry their own licences; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-orbit-vmm is an independent project. It is not affiliated with Docker, Inc.,
-OrbStack, or Apple.

@@ -1,11 +1,11 @@
 # orbit-vmm
 
-[English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | **简体中文** | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [हिन्दी](README.hi.md)
+[English](../../../README.md) | [한국어](../ko/README.md) | [日本語](../ja/README.md) | **简体中文** | [Español](../es/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Français](../fr/README.md) | [Deutsch](../de/README.md) | [हिन्दी](../hi/README.md)
 
-> 本文档为译文。英文 [README](README.md) 为准；如两者有出入，请以英文版为准。
+> 本文档为译文。英文 [README](../../../README.md) 为准；如两者有出入，请以英文版为准。
 
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
 
 一个面向 Apple Silicon Mac、节省内存的 Docker 引擎。
 
@@ -28,7 +28,7 @@ orbit-vmm 则会把内存还回去。客户机会报告它释放的内存页
 - **内存归还给 macOS。** 以 16 KiB 粒度进行 free page reporting，
   并裁剪空闲页缓存。工作负载退出后，虚拟机在 Mac 上的内存占用会在
   一分钟内回落到约 1 GB
-  （[基准测试](docs/benchmarks.md)）。
+  （[基准测试](benchmarks.md)）。
 - **基于 virtio-fs 的 bind mount。** `-v $PWD:/app` 使用与 Mac 上相同的路径。
   它具有多个请求队列、属性缓存和 readdirplus。
   在 Mac 上编辑文件、新建文件和目录、重命名和删除都会在容器中触发 inotify
@@ -80,7 +80,7 @@ macOS，以及活动监视器（Activity Monitor）如何统计它，都由 macO
    零，在内存压力下约为压缩量的三分之一到一半。如果在其他 macOS
    版本上差距不同，那是 macOS 统计方式的变化，而不是内存泄漏，前提是
    `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` 显示 VMM 持有的内存与
-   客户机使用的量大致相当（参见 [docs/architecture.md](docs/architecture.md)）。
+   客户机使用的量大致相当（参见 [docs/architecture.md](architecture.md)）。
 
 ## 快速开始
 
@@ -185,7 +185,7 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
 
 **不要分享 `~/.orbit/guest/*` 或 `data.img`。** 它们包含 GPL 二进制文件
 以及你这台机器所信任的根证书
-（[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。
+（[THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)）。
 
 要扩大数据磁盘，请停止虚拟机、扩大该文件，然后重新启动虚拟机。
 客户机会在启动时调整其文件系统大小：
@@ -311,7 +311,7 @@ agent，用来运行已安装的 `~/.orbit/bin/healthcheck.py`。它会检查 Do
 
 ## 工作原理
 
-参见 [docs/architecture.md](docs/architecture.md)。简而言之：
+参见 [docs/architecture.md](architecture.md)。简而言之：
 
 ```
 docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
@@ -323,14 +323,11 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 ## 参与贡献
 
 欢迎提交 bug 报告和 pull request。开发环境搭建和检查项请参见
-[CONTRIBUTING.md](CONTRIBUTING.md)。
-安全问题请私下报告（[SECURITY.md](SECURITY.md)）。
+[CONTRIBUTING.md](../../../CONTRIBUTING.md)。
+安全问题请私下报告（[SECURITY.md](../../../SECURITY.md)）。
 
 ## 许可证
 
-Apache-2.0（[LICENSE](LICENSE)）。你构建的客户机镜像会下载 Alpine
+Apache-2.0（[LICENSE](../../../LICENSE)）。你构建的客户机镜像会下载 Alpine
 Linux 软件包，这些软件包有各自的许可证；参见
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-orbit-vmm 是一个独立项目，与 Docker, Inc.、
-OrbStack 或 Apple 均无关联。
+[THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)。

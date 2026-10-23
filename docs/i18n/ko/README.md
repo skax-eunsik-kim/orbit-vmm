@@ -1,11 +1,11 @@
 # orbit-vmm
 
-[English](README.md) | **한국어** | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [हिन्दी](README.hi.md)
+[English](../../../README.md) | **한국어** | [日本語](../ja/README.md) | [简体中文](../zh-CN/README.md) | [Español](../es/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Français](../fr/README.md) | [Deutsch](../de/README.md) | [हिन्दी](../hi/README.md)
 
-> 번역본입니다. 기준은 영어 [README.md](README.md)이며, 내용이 다르면 영어판을 따르세요.
+> 번역본입니다. 기준은 영어 [README.md](../../../README.md)이며, 내용이 다르면 영어판을 따르세요.
 
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
 
 Apple Silicon Mac 용으로 메모리를 아껴 쓰는 Docker 엔진입니다.
 
@@ -27,7 +27,7 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
 
 - **메모리를 macOS 에 돌려줍니다.** 16 KiB 단위 free page reporting 과 유휴 페이지
   캐시 정리를 합니다. 작업이 끝나면 Mac 에서 VM 이 차지하는 메모리가 1분 안에 약
-  1 GB 로 돌아옵니다([벤치마크](docs/benchmarks.md)).
+  1 GB 로 돌아옵니다([벤치마크](benchmarks.md)).
 - **virtio-fs 로 bind mount.** `-v $PWD:/app` 이 Mac 과 같은 경로로 동작합니다. 요청
   큐 여러 개, 속성 캐시, readdirplus 를 씁니다. Mac 에서 파일을 고치거나, 새 파일·
   디렉터리를 만들거나, 이름을 바꾸거나 지우면 컨테이너에 inotify 이벤트가 갑니다.
@@ -77,7 +77,7 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
    압축량의 3분의 1에서 절반 정도였습니다. 다른 macOS 버전에서 차이가 달라도,
    `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` 로 VMM 이 게스트가 쓰는 만큼만 들고 있는
    것이 확인되면 누수가 아니라 macOS 가 세는 방식이 바뀐 것입니다
-   ([docs/architecture.md](docs/architecture.md) 참고).
+   ([docs/architecture.md](architecture.md) 참고).
 
 ## 빠른 시작
 
@@ -178,7 +178,7 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
 | `~/.orbit/vmm/watchdog.log`, `crashes/` | 감시 프로세스 로그와 예기치 않은 종료 기록. |
 
 **`~/.orbit/guest/*` 와 `data.img` 는 공유하지 마세요.** GPL 바이너리와 이 Mac 이
-신뢰하는 루트 인증서가 들어 있습니다([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+신뢰하는 루트 인증서가 들어 있습니다([THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)).
 
 데이터 디스크를 키우려면 VM 을 멈추고 파일을 늘린 뒤 다시 시작하세요. 게스트가 부팅할
 때 파일 시스템 크기를 맞춥니다.
@@ -291,7 +291,7 @@ bind mount, inotify, 게스트 시계를 확인하고, VMM 의 메모리·스레
 
 ## 동작 방식
 
-[docs/architecture.md](docs/architecture.md)를 보세요. 요약하면:
+[docs/architecture.md](architecture.md)를 보세요. 요약하면:
 
 ```
 docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
@@ -303,12 +303,10 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 ## 기여
 
 버그 보고와 풀 리퀘스트를 환영합니다. 개발 환경과 검사는
-[CONTRIBUTING.md](CONTRIBUTING.md)를 보세요. 보안 문제는 비공개로 알려 주세요
-([SECURITY.md](SECURITY.md)).
+[CONTRIBUTING.md](../../../CONTRIBUTING.md)를 보세요. 보안 문제는 비공개로 알려 주세요
+([SECURITY.md](../../../SECURITY.md)).
 
 ## 라이선스
 
-Apache-2.0([LICENSE](LICENSE)). 빌드하는 게스트 이미지는 Alpine Linux 패키지를 받으며,
-그 패키지에는 각자의 라이선스가 있습니다([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
-
-orbit-vmm 은 독립 프로젝트이며 Docker, Inc., OrbStack, Apple 과 관계가 없습니다.
+Apache-2.0([LICENSE](../../../LICENSE)). 빌드하는 게스트 이미지는 Alpine Linux 패키지를 받으며,
+그 패키지에는 각자의 라이선스가 있습니다([THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)).

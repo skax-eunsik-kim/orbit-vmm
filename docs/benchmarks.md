@@ -1,5 +1,7 @@
 # Benchmarks
 
+**English** | [한국어](i18n/ko/benchmarks.md) | [日本語](i18n/ja/benchmarks.md) | [简体中文](i18n/zh-CN/benchmarks.md) | [Español](i18n/es/benchmarks.md) | [Português (Brasil)](i18n/pt-BR/benchmarks.md) | [Français](i18n/fr/benchmarks.md) | [Deutsch](i18n/de/benchmarks.md) | [हिन्दी](i18n/hi/benchmarks.md)
+
 All numbers are from one M-series MacBook (macOS 26) in October 2026, using
 the scripts in `bench/`. They show orders of magnitude, not precise results.
 Run the scripts yourself to compare on your machine.
@@ -8,7 +10,7 @@ Run the scripts yourself to compare on your machine.
 
 `bench/memtest.sh` measures the VM process's `phys_footprint` at four points:
 idle, during a container that dirties about 3.5 GB (page cache plus anonymous
-memory), and 90 s after the container exits. The table shows idle and after
+memory), and 30 s and 90 s after the container exits. The table shows idle and after
 90 s.
 
 | Engine | Idle | 90 s after exit |
@@ -29,7 +31,7 @@ memory), and 90 s after the container exits. The table shows idle and after
 
 ## Developer workflow
 
-`bench/devflow/devflow.sh` runs 21 checks:
+`bench/devflow/devflow.sh` runs 25 checks:
 
 - compose up with healthchecks, and published ports from the Mac
 - service DNS and `host.docker.internal`
@@ -40,7 +42,7 @@ memory), and 90 s after the container exits. The table shows idle and after
   migration
 - logs, exec, stats and clock skew
 
-Current result: 21/21 pass.
+Current result: 25/25 pass.
 
 ## Stability
 

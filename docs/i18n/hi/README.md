@@ -1,11 +1,11 @@
 # orbit-vmm
 
-[English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [Português (Brasil)](README.pt-BR.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | **हिन्दी**
+[English](../../../README.md) | [한국어](../ko/README.md) | [日本語](../ja/README.md) | [简体中文](../zh-CN/README.md) | [Español](../es/README.md) | [Português (Brasil)](../pt-BR/README.md) | [Français](../fr/README.md) | [Deutsch](../de/README.md) | **हिन्दी**
 
-> यह एक अनुवाद है। English [README](README.md) ही source of truth है; अगर दोनों में अंतर हो, तो English version को मानें।
+> यह एक अनुवाद है। English [README](../../../README.md) ही source of truth है; अगर दोनों में अंतर हो, तो English version को मानें।
 
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
 
 Apple Silicon Mac के लिए memory की बचत करने वाला Docker engine।
 
@@ -28,7 +28,7 @@ compact करता है, ताकि free हुई memory सच में
 - **Memory वापस macOS को जाती है।** 16 KiB granularity पर free page reporting,
   साथ में idle page cache trimming। किसी workload के खत्म होने के बाद, Mac पर VM का
   footprint एक minute के अंदर लगभग 1 GB पर वापस आ जाता है
-  ([benchmarks](docs/benchmarks.md))।
+  ([benchmarks](benchmarks.md))।
 - **virtio-fs पर bind mounts।** `-v $PWD:/app` उसी path पर काम करता है जैसे Mac पर।
   इसमें multiple request queues, attribute caching और readdirplus हैं।
   Mac पर किए गए edits, नई files और directories, renames और deletions containers में
@@ -80,7 +80,7 @@ compact करता है, ताकि free हुई memory सच में
    यह अंतर लगभग शून्य था, और pressure में compressed मात्रा का लगभग एक-तिहाई से आधा था।
    किसी दूसरे macOS version पर अलग अंतर macOS के गिनने के तरीके में बदलाव है, leak नहीं,
    बशर्ते `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` यह दिखाएँ कि VMM लगभग उतनी ही memory
-   रखे हुए है जितनी guest इस्तेमाल करता है ([docs/architecture.md](docs/architecture.md) देखें)।
+   रखे हुए है जितनी guest इस्तेमाल करता है ([docs/architecture.md](architecture.md) देखें)।
 
 ## Quick start
 
@@ -186,7 +186,7 @@ home directory, उसके ऊपर की कोई भी चीज़, hid
 
 **`~/.orbit/guest/*` या `data.img` को share न करें।** इनमें GPL binaries
 और आपकी machine के trusted root certificates होते हैं
-([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))।
+([THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md))।
 
 Data disk बढ़ाने के लिए, VM को रोकें, file को बड़ा करें, और VM को फिर से start करें।
 Guest boot होने पर अपने filesystem का size बदल लेता है:
@@ -313,7 +313,7 @@ Check हर घंटे चलता है। लगातार तीन he
 
 ## यह कैसे काम करता है
 
-[docs/architecture.md](docs/architecture.md) देखें। संक्षेप में:
+[docs/architecture.md](architecture.md) देखें। संक्षेप में:
 
 ```
 docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
@@ -325,14 +325,11 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 ## योगदान
 
 Bug reports और pull requests का स्वागत है। Development setup और checks के लिए
-[CONTRIBUTING.md](CONTRIBUTING.md) देखें।
-Security issues की report निजी तौर पर करें ([SECURITY.md](SECURITY.md))।
+[CONTRIBUTING.md](../../../CONTRIBUTING.md) देखें।
+Security issues की report निजी तौर पर करें ([SECURITY.md](../../../SECURITY.md))।
 
 ## License
 
-Apache-2.0 ([LICENSE](LICENSE))। आप जो guest image build करते हैं, वह Alpine
+Apache-2.0 ([LICENSE](../../../LICENSE))। आप जो guest image build करते हैं, वह Alpine
 Linux packages download करती है, जिनके अपने licences हैं;
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) देखें।
-
-orbit-vmm एक स्वतंत्र project है। यह Docker, Inc.,
-OrbStack, या Apple से संबद्ध नहीं है।
+[THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md) देखें।
