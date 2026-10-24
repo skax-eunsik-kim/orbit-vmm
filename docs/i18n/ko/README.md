@@ -23,6 +23,10 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
 > 관리자가 한 명이며 설치 프로그램이나 GUI 가 없습니다. 의존하기 전에
 > [알려진 한계](#알려진-한계)를 읽어 주세요.
 
+> **Windows를 쓰나요?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win)은 Windows용 형제 프로젝트입니다.
+> 같은 게스트와 같은 메모리 반환 방식을 Windows Hypervisor Platform 위에서
+> 씁니다. 저장소는 지금은 비공개입니다.
+
 ## 특징
 
 - **메모리를 macOS 에 돌려줍니다.** 16 KiB 단위 free page reporting 과 유휴 페이지

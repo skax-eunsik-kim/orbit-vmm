@@ -25,6 +25,10 @@ réellement être rendue.
 > d'interface graphique. Lisez les [Limitations connues](#limitations-connues)
 > avant d'en dépendre.
 
+> **Sous Windows ?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) est le projet frère pour Windows :
+> le même invité et la même restitution de mémoire, sur Windows Hypervisor
+> Platform. Son dépôt est privé pour l'instant.
+
 ## Fonctionnalités
 
 - **La mémoire retourne à macOS.** Free page reporting à une granularité de

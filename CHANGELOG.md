@@ -7,6 +7,8 @@ All notable changes are listed here. The format follows
 
 ### Docs
 
+- The README points Windows users to orbit-win, the Windows sibling
+  (its repository is private for now).
 - `docs/architecture.md` describes the current design again: the data disk
   (discard, disk guard), signals, the directory-fd cache, Docker-event port
   forwarding, DNS, the CA wrapper's build-step handling, and the Mac-side

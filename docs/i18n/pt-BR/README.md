@@ -25,6 +25,10 @@ devolvida.
 > jovem, tem um único mantenedor e não tem instalador nem GUI. Leia
 > [Limitações conhecidas](#limitações-conhecidas) antes de depender dele.
 
+> **Usa Windows?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) é o projeto irmão para Windows: o
+> mesmo convidado e a mesma devolução de memória, sobre o Windows Hypervisor
+> Platform. Por enquanto o repositório é privado.
+
 ## Recursos
 
 - **A memória volta para o macOS.** Free page reporting com granularidade de

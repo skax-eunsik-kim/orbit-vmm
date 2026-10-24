@@ -25,6 +25,10 @@ freigegebener Speicher tatsächlich zurückgegeben werden kann.
 > hat einen einzigen Maintainer und weder Installer noch GUI. Vor dem Einsatz
 > [Bekannte Einschränkungen](#bekannte-einschränkungen) lesen.
 
+> **Unter Windows?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) ist das Schwesterprojekt für
+> Windows: derselbe Gast und dieselbe Speicherrückgabe auf der Windows
+> Hypervisor Platform. Das Repository ist vorerst privat.
+
 ## Funktionen
 
 - **Speicher geht an macOS zurück.** Free Page Reporting mit einer Granularität
