@@ -23,6 +23,10 @@ orbit-vmm はメモリを返却します。ゲストは解放したページを�
 > メンテナーは 1 人だけ、インストーラーや GUI もありません。依存する前に
 > [既知の制限](#既知の制限) をお読みください。
 
+> **Windows をお使いですか?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) は Windows 版の兄弟プロジェクトです。
+> 同じゲストと同じメモリ返却の仕組みを Windows Hypervisor Platform 上で使います。
+> リポジトリは現在非公開です。
+
 ## 機能
 
 - **メモリが macOS に戻ります。** 16 KiB 単位の free page reporting に加え、

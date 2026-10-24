@@ -23,6 +23,10 @@ orbit-vmm 则会把内存还回去。客户机会报告它释放的内存页
 > 只有一位维护者，也没有安装程序或 GUI。依赖它之前，请先阅读
 > [已知限制](#已知限制)。
 
+> **使用 Windows?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) 是 Windows 上的姊妹项目:在
+> Windows Hypervisor Platform 上使用相同的客户机和相同的内存归还机制。
+> 仓库目前为私有。
+
 ## 功能
 
 - **内存归还给 macOS。** 以 16 KiB 粒度进行 free page reporting，

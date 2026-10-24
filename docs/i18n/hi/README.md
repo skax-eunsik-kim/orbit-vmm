@@ -23,6 +23,10 @@ compact करता है, ताकि free हुई memory सच में
 > इसका एक ही maintainer है, और इसमें कोई installer या GUI नहीं है। इस पर निर्भर होने से पहले
 > [ज्ञात सीमाएँ](#ज्ञात-सीमाएँ) पढ़ें।
 
+> **Windows पर हैं?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) Windows के लिए सहोदर प्रोजेक्ट है:
+> वही गेस्ट और मेमोरी लौटाने का वही तरीका, Windows Hypervisor Platform पर।
+> इसकी रिपॉज़िटरी अभी निजी है।
+
 ## विशेषताएँ
 
 - **Memory वापस macOS को जाती है।** 16 KiB granularity पर free page reporting,

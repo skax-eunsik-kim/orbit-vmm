@@ -25,6 +25,10 @@ la memoria liberada pueda devolverse de verdad.
 > es joven, tiene un solo mantenedor y no tiene instalador ni GUI. Lee
 > [Limitaciones conocidas](#limitaciones-conocidas) antes de depender de él.
 
+> **¿Usas Windows?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) es el proyecto hermano para Windows:
+> el mismo invitado y la misma devolución de memoria, sobre Windows Hypervisor
+> Platform. Por ahora su repositorio es privado.
+
 ## Características
 
 - **La memoria vuelve a macOS.** Free page reporting con granularidad de

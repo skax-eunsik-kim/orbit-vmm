@@ -21,6 +21,10 @@ memory, so freed memory can actually be returned.
 > has one maintainer, and has no installer or GUI. Read
 > [Known limitations](#known-limitations) before you depend on it.
 
+> **On Windows?** [orbit-win](https://github.com/skax-eunsik-kim/orbit-win) is the Windows sibling: the same guest
+> and the same memory hand-back, on the Windows Hypervisor Platform. Its
+> repository is private for now.
+
 ## Features
 
 - **Memory goes back to macOS.** Free page reporting at 16 KiB granularity,
