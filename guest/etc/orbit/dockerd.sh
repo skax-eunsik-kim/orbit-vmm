@@ -13,6 +13,7 @@ cat > /etc/docker/daemon.json <<JSON
   "default-runtime": "orbit",
   "host-gateway-ip": "$(cat /etc/orbit/host-ip 2>/dev/null || echo 10.0.2.2)",
   "group": "root",
+  "shutdown-timeout": 30,
   "builder": { "gc": { "enabled": true, "defaultReservedSpace": "2GB", "defaultMaxUsedSpace": "20GB", "defaultMinFreeSpace": "10GB" } }
 }
 JSON

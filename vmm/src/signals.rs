@@ -13,7 +13,7 @@ use std::time::Duration;
 static SENDER: AtomicI32 = AtomicI32::new(0);
 static RECEIVED: AtomicI32 = AtomicI32::new(0);
 static PIPE: AtomicI32 = AtomicI32::new(-1);
-const GRACE: Duration = Duration::from_secs(30);
+const GRACE: Duration = Duration::from_secs(75);
 
 extern "C" fn on_signal(sig: libc::c_int, info: *mut libc::siginfo_t, _: *mut libc::c_void) {
     // Async-signal-safe only: atomics and write(2).

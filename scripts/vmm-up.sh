@@ -25,7 +25,8 @@ stop_vm() {
   local old sup
   old=$(cat "$D/vmm.pid" 2>/dev/null)
   sup=$(cat "$D/run.pid" 2>/dev/null)
-  for _ in $(seq 1 120); do kill -0 "$old" 2>/dev/null || break; sleep 0.5; done
+  # The guest gives dockerd 45 s; allow 75 s for the whole power-off.
+  for _ in $(seq 1 150); do kill -0 "$old" 2>/dev/null || break; sleep 0.5; done
   if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then echo "VM $old is still running" >&2; return 1; fi
   # ...and its supervisor finishing up (a new start must not race it).
   for _ in $(seq 1 40); do kill -0 "$sup" 2>/dev/null || return 0; sleep 0.25; done
