@@ -32,7 +32,7 @@
 
 ## 開発ワークフロー
 
-`bench/devflow/devflow.sh` は 25 項目のチェックを実行します。
+`bench/devflow/devflow.sh` は 26 項目のチェックを実行します。
 
 - healthcheck 付きの compose up と、Mac からの公開ポート
 - サービスの DNS と `host.docker.internal`
@@ -43,7 +43,7 @@
   マイグレーション
 - logs、exec、stats、時刻のずれ
 
-現在の結果: 25/25 合格。
+現在の結果: 26/26 合格。
 
 ## 安定性
 

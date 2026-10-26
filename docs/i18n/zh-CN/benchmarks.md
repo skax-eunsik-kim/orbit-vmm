@@ -32,7 +32,7 @@
 
 ## 开发者工作流
 
-`bench/devflow/devflow.sh` 运行 25 项检查：
+`bench/devflow/devflow.sh` 运行 26 项检查：
 
 - 带健康检查的 compose up，以及从 Mac 访问已发布的端口
 - 服务 DNS 和 `host.docker.internal`
@@ -43,7 +43,7 @@
   迁移
 - 日志、exec、stats 和时钟偏差
 
-当前结果：25/25 通过。
+当前结果：26/26 通过。
 
 ## 稳定性
 

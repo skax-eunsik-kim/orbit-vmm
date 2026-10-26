@@ -9,6 +9,8 @@ Certificates that are merely present in a keychain (intermediates, device or
 purposes (Wi-Fi/EAP, S/MIME, code signing), and anything that isn't a CA
 certificate are left out.
 """
+import base64
+import hashlib
 import os
 import plistlib
 import re
@@ -51,17 +53,15 @@ def trusted_sha1s():
 
 
 def certs_by_sha1():
+    """Keychain certificates keyed by the SHA-1 of their own DER bytes."""
     found = {}
     for kc in KEYCHAINS:
         if not os.path.exists(kc):
             continue
-        r = subprocess.run(["security", "find-certificate", "-a", "-Z", "-p", kc], capture_output=True, text=True)
-        for sha1, pem in re.findall(
-            r"SHA-1 hash: ([0-9A-F]+)\n(?:.*\n)*?(-----BEGIN CERTIFICATE-----\n.*?-----END CERTIFICATE-----\n)",
-            r.stdout,
-            re.S,
-        ):
-            found.setdefault(sha1.upper(), pem)
+        r = subprocess.run(["security", "find-certificate", "-a", "-p", kc], capture_output=True, text=True)
+        for pem in re.findall(r"-----BEGIN CERTIFICATE-----\n.*?-----END CERTIFICATE-----\n", r.stdout, re.S):
+            body = "".join(pem.splitlines()[1:-1])
+            found.setdefault(hashlib.sha1(base64.b64decode(body)).hexdigest().upper(), pem)
     return found
 
 

@@ -25,7 +25,9 @@ snapshot_boot() {
   # Wait briefly for the disk to appear, then mount it read-write for /data.
   for i in 1 2 3 4 5 6 7 8 9 10; do [ -b /dev/vda ] && break; sleep 0.1; done
   mount -t ext4 -o noatime /dev/vda /data 2>/dev/null || return 1
-  if ! cmp -s /data/rootfs/etc/orbit/build-id /etc/orbit/build-id; then
+  # Same build, and a complete one: a snapshot saved after a failed package
+  # install (no dockerd) would otherwise be reused forever.
+  if ! cmp -s /data/rootfs/etc/orbit/build-id /etc/orbit/build-id || [ ! -x /data/rootfs/usr/bin/dockerd ]; then
     umount /data
     return 1
   fi

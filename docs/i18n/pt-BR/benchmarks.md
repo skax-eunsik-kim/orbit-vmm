@@ -33,7 +33,7 @@ anônima) e 30 s e 90 s após o container encerrar. A tabela mostra o estado oci
 
 ## Fluxo de trabalho de desenvolvimento
 
-`bench/devflow/devflow.sh` executa 25 verificações:
+`bench/devflow/devflow.sh` executa 26 verificações:
 
 - compose up com healthchecks e portas publicadas acessíveis a partir do Mac
 - DNS de serviços e `host.docker.internal`
@@ -44,7 +44,7 @@ anônima) e 30 s e 90 s após o container encerrar. A tabela mostra o estado oci
   do alembic
 - logs, exec, stats e desvio de relógio
 
-Resultado atual: 25/25 passam.
+Resultado atual: 26/26 passam.
 
 ## Estabilidade
 

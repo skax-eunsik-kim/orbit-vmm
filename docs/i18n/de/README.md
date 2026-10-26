@@ -77,7 +77,7 @@ macOS. Daher vor dem Einsatz auf einer neuen Version diese drei Punkte prüfen:
    Wert bei ~257 MiB, wird freigegebener Gastspeicher auf dieser Version nicht
    zurückgegeben: Die VM wächst auf dem Mac dann nur.
 2. **Entwickler-Workflow.** Bei laufender VM muss `make devflow`
-   0 fail (25 Prüfungen) melden.
+   0 fail (26 Prüfungen) melden.
 3. **Aktivitätsanzeige.** Ihre Spalte „Speicher“ entspricht dem
    `phys_footprint` des VMM. Wenn der Mac knapp an Speicher ist, komprimiert
    macOS einen Teil des Gast-RAM, und dieser Wert steigt über das hinaus, was der

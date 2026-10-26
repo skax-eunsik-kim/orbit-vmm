@@ -81,7 +81,7 @@ sur une nouvelle version avant de vous y fier :
    Si elle reste à ~257 MiB, la mémoire libérée par l'invité n'est pas rendue
    sur cette version : la VM ne fait que grossir sur le Mac.
 2. **Workflow de développement.** Avec la VM démarrée : `make devflow` doit
-   indiquer 0 fail (25 vérifications).
+   indiquer 0 fail (26 vérifications).
 3. **Moniteur d'activité.** Sa colonne Mémoire correspond au `phys_footprint`
    du VMM. Lorsque le Mac manque de mémoire, macOS compresse une partie de la
    RAM de l'invité et ce nombre dépasse ce que l'invité utilise. Lors des tests,
