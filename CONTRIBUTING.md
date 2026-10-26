@@ -19,13 +19,17 @@ You need an Apple Silicon Mac on macOS 15 or later.
 ```bash
 brew install rust libslirp shellcheck docker docker-compose
 git clone https://github.com/<you>/orbit-vmm && cd orbit-vmm
-make guest install up
+make guest install && ~/.orbit/bin/orbit up
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 ```
 
-`make install` copies your build to `~/.orbit/bin`, and `make up` runs the VM
-from there. Keep the checkout inside a shared directory (`~/src`, `~/work`, …; see
-`ORBIT_SHARE_ALLOW`), because the benchmark scripts bind-mount files from it.
+`make install` copies your build to `~/.orbit/bin`, and `orbit up` (or
+`make up`) runs the VM from there. The benchmark scripts bind-mount files from
+the checkout, so a development checkout has to be inside a shared directory
+(`~/src`, `~/work`, …; see `ORBIT_SHARE_ALLOW`), and `make install` warns about
+it. Containers can change such a checkout: check `git status` and `git diff`
+before `make install` or `make guest`, and use a separate clone outside shared
+directories (README "Quick start") for the orbit you rely on day to day.
 
 Repository layout:
 

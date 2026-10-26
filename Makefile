@@ -1,7 +1,7 @@
 # Developer entry points. `make help` lists them.
 SHELL := /bin/bash
 DOCKER_SOCK := unix://$(HOME)/.orbit/vmm/docker.sock
-SH_FILES := $(shell git ls-files '*.sh' guest/init 'guest/etc/orbit/*' 'vmm/guest/init-*' | grep -v '\.py$$' | sort -u)
+SH_FILES := $(shell git ls-files '*.sh' scripts/orbit guest/init 'guest/etc/orbit/*' 'vmm/guest/init-*' | grep -v '\.py$$' | sort -u)
 
 .PHONY: help guest build install up down update rollback test lint fmt devflow clean
 
@@ -9,7 +9,7 @@ help:
 	@echo "make guest    download + build the guest kernel/initramfs (~/.orbit/guest)"
 	@echo "make build    build and sign vmm/target/release/orbit-vmm"
 	@echo "make install  build, copy the VMM and scripts to ~/.orbit/bin (outside shared dirs), install the watchdog"
-	@echo "make up       (re)start the VM from ~/.orbit/bin (builds nothing)"
+	@echo "make up       orbit up: (re)start the VM from ~/.orbit/bin (builds nothing)"
 	@echo "make down     shut the VM down (the watchdog won't restart it)"
 	@echo "make update   install the latest release (TO=<tag>; NOW=1 restarts even with containers running)"
 	@echo "make rollback go back to the version installed before the last update"
@@ -26,22 +26,22 @@ build:
 install: build
 	./scripts/install.sh
 
-# Runs only the installed copy: the checkout may be in a shared directory that
-# containers can write to, so restarting must not build or run anything from it.
+# These run only the installed `orbit` command: the checkout may be in a
+# shared directory that containers can write to.
+ORBIT := $(HOME)/.orbit/bin/orbit
+NEED_ORBIT = @test -x $(ORBIT) || { echo "run make install first"; exit 1; }
 up:
-	@test -x $(HOME)/.orbit/bin/vmm-up.sh || { echo "run make install first"; exit 1; }
-	$(HOME)/.orbit/bin/vmm-up.sh
-
+	$(NEED_ORBIT)
+	$(ORBIT) up
 down:
-	$(HOME)/.orbit/bin/vmm-up.sh --stop
-
-# Builds the latest release (or TO=<tag>) in ~/.orbit/src, not here. NOW=1
-# restarts the VM even if containers are running.
+	$(NEED_ORBIT)
+	$(ORBIT) down
 update:
-	./scripts/update.sh $(if $(TO),--to $(TO)) $(if $(NOW),--now)
-
+	$(NEED_ORBIT)
+	$(ORBIT) update $(if $(TO),--to $(TO)) $(if $(NOW),--now)
 rollback:
-	./scripts/update.sh --rollback $(if $(NOW),--now)
+	$(NEED_ORBIT)
+	$(ORBIT) rollback $(if $(NOW),--now)
 
 test:
 	cd vmm && cargo test

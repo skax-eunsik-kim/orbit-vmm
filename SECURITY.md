@@ -33,7 +33,10 @@ These are deliberate trade-offs, documented so you can decide for yourself:
 - **Shared directories are writable from the guest.** A container can modify
   anything in them, including source code and build scripts you later run on
   the Mac. orbit-vmm itself runs from `~/.orbit/bin` (`make install`), not from
-  the checkout, and `make up` builds nothing. The VMM refuses to share your
+  the checkout: the `orbit` command (`up`, `down`, `update`, `rollback`) runs
+  only installed copies, and `orbit update` builds in `~/.orbit/src` from the
+  repository recorded at install time. Clone orbit outside shared directories;
+  `make install` warns when the checkout is in one. The VMM refuses to share your
   home directory or anything above it, hidden directories, `~/Library`,
   `~/bin`, or `~/Applications`. It
   also never lets the guest rename, remove or replace the shared directories

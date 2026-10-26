@@ -1,32 +1,35 @@
 #!/bin/bash
 # Updates orbit to the latest release, or goes back to the previous one.
 #
-#   make update              latest release tag
-#   make update TO=v0.2.1    a given tag
-#   make rollback            back to what was installed before the last update
-#   NOW=1                    restart the VM even if containers are running
+#   orbit update             latest release tag
+#   orbit update --to v0.2.1 a given tag
+#   orbit rollback           back to what was installed before the last update
+#   --now                    restart the VM even if containers are running
 #
-# It builds in its own clone, ~/.orbit/src, not in this checkout: the checkout
-# is often in a directory containers can write to. Before replacing anything it
+# Installed as ~/.orbit/bin/update.sh and run from there by `orbit`. It builds
+# in its own clone, ~/.orbit/src, from the repository recorded in
+# ~/.orbit/bin/VERSION at install time, never from a checkout: a checkout is
+# often in a directory containers can write to. Before replacing anything it
 # keeps the installed binaries and guest as ~/.orbit/bin.prev and
 # ~/.orbit/guest.prev; rollback swaps them back (so a second rollback redoes
 # the update). Restarting the VM stops its containers, so it restarts only
-# when none are running, or with NOW=1.
+# when none are running, or with --now.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOME_DIR="${ORBIT_HOME:-$HOME/.orbit}"
+# Run as <home>/bin/update.sh: <home> is ~/.orbit (or a test install's).
+HOME_DIR="${ORBIT_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
 SRC="${ORBIT_SRC:-$HOME_DIR/src}"
 BIN="${ORBIT_BIN:-$HOME_DIR/bin}"
 GUEST="$HOME_DIR/guest"
 SOCK="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}/docker.sock"
-URL="${ORBIT_UPDATE_URL:-$(git -C "$ROOT" remote get-url origin)}"
+repo=$(sed -n 's/^repo=//p' "$BIN/VERSION" 2>/dev/null || true)
+URL="${ORBIT_UPDATE_URL:-${repo:+https://github.com/$repo.git}}"
 mode=update now=0 to=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --rollback) mode=rollback ;;
     --now) now=1 ;;
     --to) to=$2; shift ;;
-    *) echo "usage: $0 [--to TAG] [--now] | --rollback [--now]" >&2; exit 2 ;;
+    *) echo "usage: orbit update [--to TAG] [--now] | orbit rollback [--now]" >&2; exit 2 ;;
   esac
   shift
 done
@@ -36,13 +39,13 @@ installed() { sed -n 's/^version=//p' "$BIN/VERSION" 2>/dev/null; }
 restart() {
   local pid
   pid=$(cat "$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}/vmm.pid" 2>/dev/null || true)
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || { echo "the VM isn't running; start it with make up"; return; }
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || { echo "the VM isn't running; start it with orbit up"; return; }
   local n
   n=$(DOCKER_HOST="unix://$SOCK" docker ps -q 2>/dev/null | wc -l | tr -d ' ')
   if [ "$now" = 1 ] || [ "$n" = 0 ]; then
     "$BIN/vmm-up.sh"
   else
-    echo "$n container(s) running, so the VM keeps the old version until you restart it: make up (or NOW=1)"
+    echo "$n container(s) running, so the VM keeps the old version until you restart it: orbit up (or --now)"
   fi
 }
 
@@ -64,7 +67,9 @@ if [ "$mode" = rollback ]; then
   exit 0
 fi
 
+[ -n "$URL" ] || die "no repository recorded in $BIN/VERSION; reinstall from a checkout (make install)"
 [ -d "$SRC/.git" ] || git clone -q "$URL" "$SRC"
+git -C "$SRC" remote set-url origin "$URL"
 git -C "$SRC" fetch -q --tags --force origin
 tag=${to:-$(git -C "$SRC" tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)}
 [ -n "$tag" ] || die "no release tags in $URL yet"
@@ -84,10 +89,9 @@ rm -rf "$BIN.prev" "$GUEST.prev"
 [ -d "$BIN" ] && cp -Rp "$BIN" "$BIN.prev"
 ORBIT_BIN="$BIN" "$SRC/scripts/install.sh"
 # Older releases' install.sh doesn't write VERSION; this run knows the tag.
-repo=$(sed -n 's/^repo=//p' "$BIN.prev/VERSION" 2>/dev/null || true)
 [ -n "$repo" ] || repo=$(echo "$URL" | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')
 printf 'version=%s\nrepo=%s\n' "$tag" "$repo" > "$BIN/VERSION"
 [ -d "$GUEST" ] && mv "$GUEST" "$GUEST.prev"
 mv "$stage/guest" "$GUEST"
-echo "installed $tag (make rollback goes back)"
+echo "installed $tag (orbit rollback goes back)"
 restart
