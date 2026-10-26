@@ -5,6 +5,22 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The CA wrapper's build-step write-back (`orbit-runc`) can no longer reach
+  guest paths outside the build step when an image, or the step itself, makes
+  a parent of a CA directory a symlink: such directories are not bound, and a
+  directory swapped during the step is not written back (#24).
+- Mac roots no longer end up in an image layer when a build step appends to or
+  edits the CA bundle, or copies it within the directory: they are removed
+  from every file before the write-back (#24).
+- The write-back replaces the directory only after a complete copy, and a
+  failed write-back fails the build step instead of committing an empty or
+  partial directory (#24).
+- The built initramfs, which holds the Mac's extra roots, is readable only by
+  its owner. The host roots are no longer appended to the guest bundle twice
+  when booting from the root snapshot.
+
 ### Docs
 
 - `docs/architecture.md` describes the current design again: the data disk
