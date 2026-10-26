@@ -69,7 +69,7 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
    `unmap + mmap(MAP_FIXED anon) + map` 줄이 `released 1 MiB` 근처로 끝나야 합니다.
    VMM 이 쓰는 방식입니다(`vmm/src/reclaim.rs`). 약 257 MiB 에 머물면 그 버전에서는
    해제한 게스트 메모리가 돌아오지 않아, Mac 에서 VM 이 늘기만 합니다.
-2. **개발 흐름.** VM 이 떠 있는 상태에서 `make devflow` 가 실패 0(검사 25개)이어야
+2. **개발 흐름.** VM 이 떠 있는 상태에서 `make devflow` 가 실패 0(검사 26개)이어야
    합니다.
 3. **활성 상태 보기.** 메모리 열은 VMM 의 `phys_footprint` 입니다. Mac 메모리가
    모자라면 macOS 가 게스트 RAM 일부를 압축하고, 그 숫자가 게스트가 실제로 쓰는

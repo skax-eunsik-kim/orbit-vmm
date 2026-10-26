@@ -92,6 +92,9 @@ rm -f "$OUT.ca"
 # Mac's roots, and a mount the build puts on the CA directory is left alone.
 check "build: nested CA bundle dirs" bash -c "printf 'FROM python:3.12-slim\nRUN touch /etc/ssl/ca-bundle.pem\nRUN tail -c \$(stat -c %%s /etc/ssl/ca-bundle.pem) /etc/ssl/certs/ca-certificates.crt | cmp - /etc/ssl/ca-bundle.pem\n' | ${D[*]} build -q --no-cache -"
 check "build: RUN --mount on CA dir kept" bash -c "printf 'FROM python:3.12-slim\nRUN --mount=type=tmpfs,target=/etc/ssl/certs test -z \"\$(ls -A /etc/ssl/certs)\"\n' | ${D[*]} build -q --no-cache -"
+# The guest's own wrapper against hostile build steps: symlinked or swapped CA
+# directories, a full disk, host roots copied around (#24).
+check "orbit-runc: hostile build steps" bash -c "${D[*]} run --rm -i --privileged --pid=host alpine:3.22 nsenter -t 1 -m -- sh -s /etc/orbit/orbit-runc < '$HERE/orbit-runc-test.sh'"
 
 # 11. alembic upgrade head against the compose postgres
 check "alembic upgrade head" "${D[@]}" run --rm --network orbittest_default \

@@ -33,7 +33,7 @@ memory), और container के exit होने के 30 s और 90 s ब�
 
 ## डेवलपर वर्कफ़्लो
 
-`bench/devflow/devflow.sh` 25 checks चलाता है:
+`bench/devflow/devflow.sh` 26 checks चलाता है:
 
 - healthchecks के साथ compose up, और Mac से published ports
 - service DNS और `host.docker.internal`
@@ -44,7 +44,7 @@ memory), और container के exit होने के 30 s और 90 s ब�
   migration
 - logs, exec, stats और clock skew
 
-मौजूदा नतीजा: 25/25 pass।
+मौजूदा नतीजा: 26/26 pass।
 
 ## स्थिरता
 

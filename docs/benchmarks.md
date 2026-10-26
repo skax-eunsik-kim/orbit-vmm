@@ -31,7 +31,7 @@ memory), and 30 s and 90 s after the container exits. The table shows idle and a
 
 ## Developer workflow
 
-`bench/devflow/devflow.sh` runs 25 checks:
+`bench/devflow/devflow.sh` runs 26 checks:
 
 - compose up with healthchecks, and published ports from the Mac
 - service DNS and `host.docker.internal`
@@ -40,9 +40,11 @@ memory), and 30 s and 90 s after the container exits. The table shows idle and a
 - HTTPS behind a TLS proxy and an amd64 image
 - a BuildKit build (`# syntax`, ghcr, apt/uv cache mounts) and an alembic
   migration
+- the guest's CA wrapper against hostile build steps (symlinked or swapped
+  CA directories, a full disk)
 - logs, exec, stats and clock skew
 
-Current result: 25/25 pass.
+Current result: 26/26 pass.
 
 ## Stability
 

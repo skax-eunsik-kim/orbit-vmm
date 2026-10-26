@@ -33,7 +33,7 @@ anonyme), puis 30 s et 90 s après la fin du conteneur. Le tableau montre le rep
 
 ## Workflow de développement
 
-`bench/devflow/devflow.sh` exécute 25 vérifications :
+`bench/devflow/devflow.sh` exécute 26 vérifications :
 
 - compose up avec healthchecks, et ports publiés depuis le Mac
 - DNS des services et `host.docker.internal`
@@ -44,7 +44,7 @@ anonyme), puis 30 s et 90 s après la fin du conteneur. Le tableau montre le rep
   alembic
 - logs, exec, stats et décalage d'horloge
 
-Résultat actuel : 25/25 réussies.
+Résultat actuel : 26/26 réussies.
 
 ## Stabilité
 
