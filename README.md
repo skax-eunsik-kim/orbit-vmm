@@ -84,11 +84,12 @@ these three things on a new version before relying on it:
 ## Quick start
 
 ```bash
-git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/src/orbit-vmm
-cd ~/src/orbit-vmm
+git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/.local/src/orbit-vmm
+cd ~/.local/src/orbit-vmm
 make guest      # download pinned Alpine kernel + rootfs (sha256-checked) into ~/.orbit/guest
-make install    # build, sign, copy the VMM and scripts to ~/.orbit/bin, install the watchdog
-make up         # start the VM from ~/.orbit/bin; first boot installs Docker (~1 min), later boots 2-4 s
+make install    # build, sign, copy the VMM, the orbit command and scripts to ~/.orbit/bin, install the watchdog
+export PATH="$HOME/.orbit/bin:$PATH"   # put this in your shell profile
+orbit up        # start the VM; first boot installs Docker (~1 min), later boots 2-4 s
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
 ```
@@ -100,17 +101,21 @@ docker context create orbit --docker host=unix://$HOME/.orbit/vmm/docker.sock
 docker context use orbit
 ```
 
-`make up` (or `~/.orbit/bin/vmm-up.sh`) restarts a running VM, which stops all
-of its containers. The VM and the health check run only from the installed
-copy in `~/.orbit/bin`. Containers can write to your shared directories, and
-this checkout is often one of them, so `make up` builds and runs nothing from
-it. Only `make install` and `make guest` do. Before running those, check that
-the checkout hasn't changed unexpectedly (`git status`). Better still, keep the
-checkout outside your shared directories.
+`orbit status` shows the installed version and whether the VM is running.
+`orbit up` restarts a running VM, which stops all of its containers.
+
+Clone orbit **outside your shared directories** (see
+[File sharing](#file-sharing)), as above. Containers can write to shared
+directories, so a checkout in one can be changed behind your back, and the
+next `make install` or `make guest` would build and run that code on the Mac.
+`make install` warns when the checkout is in a shared directory. After
+installing, `orbit` runs only the installed copies in `~/.orbit/bin` and never
+the checkout; `make up`, `make down`, `make update` and `make rollback` just
+call it.
 
 ## Configuration
 
-`scripts/vmm-up.sh` (what `make up` runs) reads these environment variables:
+`scripts/vmm-up.sh` (what `orbit up` runs) reads these environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -133,7 +138,7 @@ By default the VM can see whichever of `~/work`, `~/src`, `~/code`, `~/dev`,
 invisible. To add directories:
 
 ```bash
-ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
+ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" orbit up
 ```
 
 Shared directories are **writable by every container**. orbit-vmm refuses to
@@ -169,7 +174,7 @@ remove the shared directories themselves.
   bundle, through a mount. A build step gets a copy of the bundle's
   directory, so `update-ca-certificates` and `apt-get upgrade` work. Neither
   writes the Mac's roots into the image.
-- `ORBIT_HOST_CA=0 make guest && make up` builds a guest without them.
+- `ORBIT_HOST_CA=0 make guest && orbit up` builds a guest without them.
 - Your guest (`~/.orbit/guest`) and data disk then hold your organisation's
   CAs: don't share them outside it.
 
@@ -222,23 +227,41 @@ and losing it is how a full Mac disk corrupts the guest.
 ## Upgrading
 
 ```bash
-make update            # the latest release; TO=v0.2.1 for a given one
-make rollback          # back to what was installed before the last update
+orbit update           # the latest release; --to v0.2.1 for a given one
+orbit rollback         # back to what was installed before the last update
 ```
 
-`make update` builds the release in its own clone (`~/.orbit/src`), not in
-your checkout, and builds the new guest before replacing anything, so a failed
-download or build leaves the installed version as it was. It keeps the
-previous binaries and guest for `make rollback`. It restarts the VM only when
-no containers are running; otherwise the VM keeps the old version until
-`make up` (or run `NOW=1 make update`). The first boot after a guest upgrade
-reinstalls guest packages (about 1 min).
+`orbit update` builds the release in its own clone (`~/.orbit/src`) of the
+repository recorded at install time, not in your checkout, and builds the new
+guest before replacing anything, so a failed download or build leaves the
+installed version as it was. It keeps the previous binaries and guest for
+`orbit rollback`. It restarts the VM only when no containers are running;
+otherwise the VM keeps the old version until `orbit up` (or run
+`orbit update --now`). The first boot after a guest upgrade reinstalls guest
+packages (about 1 min).
 
 If the health check is installed, it looks up the latest release once a day
 and shows one macOS notification per newer release. Nothing is installed
-without `make update`.
+without `orbit update`.
 
-To follow `main` instead of releases: `git pull && make guest install up`.
+To follow `main` instead of releases: `git pull && make guest install && orbit up`
+in your checkout.
+
+Installed v0.2.1 or older? Run `make update` once from your checkout; that
+installs the `orbit` command.
+
+## Uninstall
+
+```bash
+orbit uninstall
+```
+
+It stops every orbit VM, removes the launchd agents (watchdog and health
+check), the health check's scratch directories in your shared directories, and
+`~/.orbit`, **including the data disks with every image, container and
+volume**. It asks first (`--yes` skips the question). It leaves your checkout,
+and a Docker context named `orbit` if you created one
+(`docker context rm orbit`).
 
 ## Watchdog
 
@@ -266,11 +289,11 @@ Installing again leaves a running VM alone.
   log). The 10 newest are kept, and you get a macOS notification. Containers
   stop with the VM, so ones without a `restart:` policy have to be started
   again.
-- **On purpose:** `make down` (`vmm-up.sh --stop`) and a guest `poweroff`
+- **On purpose:** `orbit down` (`vmm-up.sh --stop`) and a guest `poweroff`
   count as intended stops and are not restarted. A VM that was running when
   you logged out starts again at login.
 
-Without the watchdog, `make up` runs the same supervisor in the background,
+Without the watchdog, `orbit up` runs the same supervisor in the background,
 so hangs are still detected and crashes still recorded, but nothing is
 restarted.
 

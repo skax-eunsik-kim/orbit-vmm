@@ -2,7 +2,7 @@
 # Installs (or with --uninstall removes) a launchd agent that runs the VM and
 # restarts it when it crashes or hangs (see vmm-run.sh). With it installed,
 # vmm-up.sh starts the VM through launchd, and a VM that was running when you
-# logged out starts again at login. `vmm-up.sh --stop` / `make down` stop it
+# logged out starts again at login. `vmm-up.sh --stop` / `orbit down` stop it
 # for good. ORBIT_INSTANCE selects the instance. `make install` runs this.
 # Re-running it leaves a running VM alone: launchd reads the plist when the
 # agent is loaded, so a changed one takes effect at the next login, or now
@@ -58,4 +58,4 @@ fi
 mv -f "$NEW" "$PLIST"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-echo "installed $LABEL; start the VM with make up (log: $D/watchdog.log, crashes: $D/crashes)"
+echo "installed $LABEL; start the VM with orbit up (log: $D/watchdog.log, crashes: $D/crashes)"

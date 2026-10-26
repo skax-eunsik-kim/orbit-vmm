@@ -21,6 +21,25 @@ All notable changes are listed here. The format follows
   its owner. The host roots are no longer appended to the guest bundle twice
   when booting from the root snapshot.
 
+### Changed
+
+- An installed `orbit` command (`~/.orbit/bin/orbit`) runs orbit: `orbit up`,
+  `down`, `status`, `update`, `rollback` and `uninstall`. `make up`,
+  `make down`, `make update` and `make rollback` now only call it, so nothing
+  in a checkout runs when you operate orbit. Before, `make update` ran the
+  checkout's `update.sh`, and a checkout in a shared directory can be changed
+  by containers (#22).
+- `orbit update` clones and fetches from the repository recorded at install
+  time, not from the checkout's `origin` (#22).
+- `make install` warns when the checkout is inside a shared directory, and the
+  README's quick start clones to `~/.local/src`, outside them (#22).
+
+### Added
+
+- `orbit uninstall`: stops every orbit VM and removes the launchd agents, the
+  health check's scratch directories and `~/.orbit` (data disks included),
+  after asking (#22).
+
 ### Fixed
 
 - A first boot whose package install failed (offline, behind a proxy) no

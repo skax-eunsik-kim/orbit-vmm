@@ -12,7 +12,7 @@
 #    corrupts the guest's ext4), and it isn't restarted.
 #  - Every abnormal exit is recorded under <instance dir>/crashes/<time>/
 #    (console log, crash report, watchdog log). The 10 newest are kept.
-#  - Exit status: 0 = stopped on purpose (guest powered off, `make down`, or
+#  - Exit status: 0 = stopped on purpose (guest powered off, `orbit down`, or
 #    nothing to do), so launchd leaves it alone. Anything else makes launchd
 #    restart it. More than 3 starts within 10 min stop the restarts.
 set -u
@@ -59,7 +59,7 @@ echo "$now" >> "$D/starts"
 awk -v n="$now" '$1 > n - 600' "$D/starts" > "$D/starts.tmp" && mv -f "$D/starts.tmp" "$D/starts"
 if [ "$(wc -l < "$D/starts")" -gt 3 ]; then
   log "crash loop: more than 3 starts in 10 min; giving up (see $D/crashes)"
-  notify "Crashed repeatedly; not restarting. Run make up after checking ~/.orbit/vmm/crashes."
+  notify "Crashed repeatedly; not restarting. Run orbit up after checking ~/.orbit/vmm/crashes."
   rm -f "$D/want-running"
   exit 0
 fi
@@ -99,7 +99,7 @@ printf '%s\n' "${SHARES[@]}" > "$D/shares"
 NET_OPTS=()
 [ "${ORBIT_HOST_LOOPBACK:-1}" = 0 ] && NET_OPTS+=(--no-host-loopback)
 S="$D/docker.sock"
-# `make down` may have raced this start.
+# `orbit down` may have raced this start.
 [ -f "$D/want-running" ] || { log "stop requested before start"; exit 0; }
 # Keep the previous run's console (vmm-up.sh used to overwrite it).
 [ -s "$D/console.log" ] && mv -f "$D/console.log" "$D/console.prev.log"
@@ -138,7 +138,7 @@ watch() {
     gb=$(free_gb)
     if [ "$gb" -lt "$STOP_GB" ]; then
       log "Mac disk has ${gb} GB free (< ${STOP_GB}); shutting the guest down"
-      notify "Mac disk almost full (${gb} GB free): the VM was shut down to protect its data. Free some space, then make up."
+      notify "Mac disk almost full (${gb} GB free): the VM was shut down to protect its data. Free some space, then orbit up."
       ctl shutdown >/dev/null
       return
     elif [ "$gb" -lt "$WARN_GB" ]; then
@@ -204,6 +204,6 @@ log "unexpected stop: $why; details in $C"
 if [ -n "${ORBIT_WATCHDOG:-}" ]; then
   notify "Stopped unexpectedly: $why. Restarting; containers were stopped."
 else
-  notify "Stopped unexpectedly: $why. Run make up to start it again."
+  notify "Stopped unexpectedly: $why. Run orbit up to start it again."
 fi
 exit "$rc"

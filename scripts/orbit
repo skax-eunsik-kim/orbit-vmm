@@ -1,0 +1,74 @@
+#!/bin/bash
+# The orbit command, installed as ~/.orbit/bin/orbit by install.sh. It runs
+# only installed copies, never a checkout: a checkout in a shared directory can
+# be changed by containers.
+#
+#   orbit up                     (re)start the VM
+#   orbit down                   shut it down (the watchdog won't restart it)
+#   orbit status                 installed version, VM, containers
+#   orbit update [--to TAG] [--now]
+#   orbit rollback [--now]
+#   orbit uninstall [--yes]      remove orbit, its VMs and their data disks
+#
+# ORBIT_INSTANCE selects the instance for up, down, status, update and rollback.
+set -euo pipefail
+BIN="$(cd "$(dirname "$0")" && pwd)"
+D="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}"
+usage() { sed -n '6,11s/^# \{0,3\}//p' "$0" >&2; exit 2; }
+
+status() {
+  echo "installed: $(sed -n 's/^version=//p' "$BIN/VERSION" 2>/dev/null || echo unknown) ($BIN)"
+  local pid
+  pid=$(cat "$D/vmm.pid" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    local n
+    n=$(DOCKER_HOST="unix://$D/docker.sock" docker ps -q 2>/dev/null | wc -l | tr -d ' ') || n="?"
+    echo "VM: running (pid $pid), $n container(s); DOCKER_HOST=unix://$D/docker.sock"
+  else
+    echo "VM: stopped (start it with: orbit up)"
+  fi
+  local agent="com.orbit.vmm${ORBIT_INSTANCE:+.$ORBIT_INSTANCE}"
+  if launchctl print "gui/$(id -u)/$agent" >/dev/null 2>&1; then echo "watchdog: $agent"; else echo "watchdog: not installed"; fi
+}
+
+uninstall() {
+  if [ "${1:-}" != --yes ]; then
+    echo "This stops every orbit VM and deletes ~/.orbit, including the data disks"
+    echo "with all images, containers and volumes, plus the launchd agents."
+    read -r -p "Type 'uninstall' to continue: " answer
+    [ "$answer" = uninstall ] || { echo "nothing removed"; exit 1; }
+  fi
+  local inst name scratch
+  for inst in "$HOME"/.orbit/vmm "$HOME"/.orbit/vmm-*; do
+    [ -d "$inst" ] || continue
+    name=${inst##*/vmm}; name=${name#-}
+    # Health-check scratch directories live in the shared directories.
+    while IFS= read -r scratch; do
+      [ -n "$scratch" ] && rm -rf "${scratch:?}/.orbit-health"
+    done < <(cat "$inst/shares" 2>/dev/null)
+    ORBIT_INSTANCE=$name "$BIN/vmm-up.sh" --stop >/dev/null 2>&1 || true
+  done
+  local plist label
+  for plist in "$HOME"/Library/LaunchAgents/com.orbit.*.plist; do
+    [ -f "$plist" ] || continue
+    label=$(basename "$plist" .plist)
+    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+    rm -f "$plist"
+    echo "removed launchd agent $label"
+  done
+  rm -rf "$HOME/.orbit"
+  echo "removed ~/.orbit"
+  if docker context inspect orbit >/dev/null 2>&1; then
+    echo "a docker context named orbit is left; remove it with: docker context rm orbit"
+  fi
+}
+
+case "${1:-}" in
+  up) shift; exec "$BIN/vmm-up.sh" "$@" ;;
+  down) exec "$BIN/vmm-up.sh" --stop ;;
+  status) status ;;
+  update) shift; exec "$BIN/update.sh" "$@" ;;
+  rollback) shift; exec "$BIN/update.sh" --rollback "$@" ;;
+  uninstall) shift; uninstall "$@" ;;
+  *) usage ;;
+esac

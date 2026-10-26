@@ -107,7 +107,8 @@ session building and starting a project's stack):
   context with `docker context use`, and don't start
   Docker Desktop or OrbStack.
 - The VM is shared with the person and their other sessions. Don't run
-  `make up`, `make down`, `make update`, `vmm-up.sh` or `docker system prune`,
+  `orbit up|down|update|rollback|uninstall`, the matching `make` targets,
+  `vmm-up.sh` or `docker system prune`,
   and don't stop containers you didn't start. Name your compose project
   (`-p <name>`) and remove only what it created.
 - Bind mounts work only under shared directories (`~/work`, `~/src`, …; see
@@ -131,5 +132,5 @@ Owner-initiated only:
    `version` in `vmm/Cargo.toml` and `vmm/Cargo.lock`.
 2. After merge: `gh release create vX.Y.Z --target <merge commit> --notes-file …`
    with short user-facing notes: highlights, how to upgrade, known limitations.
-3. Users get it with `make update`; the health check announces it. Both follow
+3. Users get it with `orbit update`; the health check announces it. Both follow
    tags only, so nothing on `main` reaches users before it is released.

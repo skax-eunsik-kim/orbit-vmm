@@ -216,7 +216,12 @@ Guest pieces:
   the clock and disk space, records the VMM's memory, threads and fds, and once
   a day reads the latest release from the `releases/latest` page and shows one
   notification per newer release.
-- `update.sh` (`make update`, `make rollback`) builds a release tag in its own
-  clone (`~/.orbit/src`) and the new guest in a staging directory, keeps the
+- `orbit` is the installed command: `up` and `down` run `vmm-up.sh`, `update`
+  and `rollback` run `update.sh`, `status` reports, and `uninstall` removes the
+  agents, the health check's scratch directories and `~/.orbit`. The
+  Makefile's run targets call it, so nothing in the checkout runs.
+- `update.sh` (`orbit update`, `orbit rollback`) builds a release tag in its own
+  clone (`~/.orbit/src`) of the repository recorded in `~/.orbit/bin/VERSION`,
+  and the new guest in a staging directory, keeps the
   previous binaries and guest for rollback, and restarts the VM only when no
   containers run.

@@ -2,7 +2,7 @@
 # (Re)starts the orbit-vmm Docker VM and waits until Docker answers.
 #   DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 # `vmm-up.sh --stop` shuts it down (and keeps the watchdog from restarting it).
-# Normally run as ~/.orbit/bin/vmm-up.sh (make install / make up). The VM runs
+# Normally run as ~/.orbit/bin/vmm-up.sh (make install / orbit up). The VM runs
 # under vmm-run.sh, through the launchd watchdog if install-watchdog.sh set it up.
 # Env: ORBIT_MEM_MIB (default 8192; unused memory is returned to macOS), ORBIT_CPUS (default: the Mac's core count), ORBIT_DISK_GB,
 #      ORBIT_GUEST (kernel + initramfs directory, default ~/.orbit/guest),

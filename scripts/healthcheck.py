@@ -14,7 +14,7 @@ healthy runs in a row, and drops back to 1 h on any failure or warning
 
 Once a day it also looks up the latest GitHub release of the installed
 repository (~/.orbit/bin/VERSION, written by install.sh) and shows one macOS
-notification per newer release. It never installs anything: make update does.
+notification per newer release. It never installs anything: orbit update does.
 
 Usage: healthcheck.py [--force] [--instance NAME]
 Exit status: 0 healthy or not due, 1 unhealthy.
@@ -342,7 +342,7 @@ def update_notice(state, now):
                           "-w", "%{redirect_url}", url], capture_output=True, text=True)
     latest = out.stdout.strip().rsplit("/tag/", 1)[-1] if "/tag/" in out.stdout else ""
     if semver(latest) > semver(info.get("version")) and state.get("update_notified") != latest:
-        notify(f"{latest} is available (installed: {info.get('version', '?')}). Run make update.")
+        notify(f"{latest} is available (installed: {info.get('version', '?')}). Run orbit update.")
         state["update_notified"] = latest
     return True
 
