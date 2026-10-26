@@ -14,6 +14,7 @@ D="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}"
 RUN="$HOME/.orbit/bin/vmm-run.sh"   # the installed copy, never the checkout
 
 if [ "${1:-}" = --uninstall ]; then
+  rm -f "$D/want-running"   # removing the agent means: stay down
   # Unloading sends SIGTERM, which vmm-run.sh turns into a clean shutdown.
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
@@ -41,7 +42,7 @@ cat > "$NEW" <<PLIST
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>10</integer>
   <key>ProcessType</key><string>Interactive</string>
-  <key>ExitTimeOut</key><integer>40</integer>
+  <key>ExitTimeOut</key><integer>90</integer>
   <key>StandardOutPath</key><string>$D/watchdog.log</string>
   <key>StandardErrorPath</key><string>$D/watchdog.log</string>
 </dict>
