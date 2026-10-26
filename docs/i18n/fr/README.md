@@ -364,3 +364,6 @@ vérifications. Signalez les problèmes de sécurité en privé
 Apache-2.0 ([LICENSE](../../../LICENSE)). L'image d'invité que vous construisez
 télécharge des paquets Alpine Linux, qui ont leurs propres licences ; voir
 [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md).
+
+orbit-vmm est un projet indépendant. Il n'est affilié ni à Docker, Inc., ni à
+OrbStack, ni à Apple.

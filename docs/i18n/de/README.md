@@ -359,3 +359,6 @@ Sicherheitsprobleme vertraulich melden ([SECURITY.md](../../../SECURITY.md)).
 Apache-2.0 ([LICENSE](../../../LICENSE)). Das selbst gebaute Gast-Image lädt
 Alpine-Linux-Pakete herunter, die eigene Lizenzen haben; siehe
 [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md).
+
+orbit-vmm ist ein unabhängiges Projekt. Es steht in keiner Verbindung zu
+Docker, Inc., OrbStack oder Apple.

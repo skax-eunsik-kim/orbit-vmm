@@ -15,7 +15,8 @@ Most Docker VMs on macOS grow to their peak memory use and stay there.
 orbit-vmm hands memory back. The guest reports the pages it frees
 (virtio-balloon *free page reporting*), and the VMM releases them to macOS
 within seconds. A small guest daemon also drops idle page cache and compacts
-memory, so freed memory can actually be returned.
+memory (defragments it, so whole free blocks can be reported), so freed memory
+can actually be returned.
 
 > **Status: early.** It runs real compose stacks every day, but it is young,
 > has one maintainer, and has no installer or GUI. Read
@@ -44,14 +45,32 @@ memory, so freed memory can actually be returned.
     `curl` work behind TLS-inspecting proxies.
 - **amd64 images** run via qemu user emulation (binfmt).
 - **Several VMs side by side** with `ORBIT_INSTANCE=<name>`.
-- **Small and auditable.** One Rust binary of about 5.5k lines. It depends on
+- **Small and auditable.** One Rust binary of about 6.3k lines of code. It depends on
   `libc`, `vm-fdt` and libslirp, and nothing else.
 
 ## Requirements
 
 - Apple Silicon Mac, macOS 15 or later (the in-kernel GIC API needs 15+).
+  Only macOS 26.4 has been tested so far; on another version, run the checks
+  below first.
+- Xcode Command Line Tools (`xcode-select --install`) and
+  [Homebrew](https://brew.sh).
 - Rust 1.87+ and libslirp: `brew install rust libslirp`.
-- Docker CLI with the compose plugin: `brew install docker docker-compose`.
+- Docker CLI with the compose and buildx plugins:
+  `brew install docker docker-compose docker-buildx`. Homebrew puts the plugins
+  where the CLI doesn't look by default, so add them to `~/.docker/config.json`:
+
+  ```json
+  { "cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"] }
+  ```
+
+  Without buildx, `docker build` falls back to the legacy builder and the
+  BuildKit checks in `make devflow` fail.
+- Python 3.11+ for the optional health check (`brew install python`).
+- Free disk space: the VM won't start with less than 3 GB free on the Mac and
+  warns below 10 GB (`ORBIT_STOP_FREE_GB` / `ORBIT_WARN_FREE_GB`). Docker's
+  data lives in a sparse `~/.orbit/vmm/data.img` that grows as you pull and
+  build.
 
 ### On a macOS version orbit hasn't been tested on
 
@@ -86,10 +105,10 @@ these three things on a new version before relying on it:
 ```bash
 git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/.local/src/orbit-vmm
 cd ~/.local/src/orbit-vmm
-make guest      # download pinned Alpine kernel + rootfs (sha256-checked) into ~/.orbit/guest
+make guest      # download Alpine kernel + rootfs (pinned, sha256-checked) into ~/.orbit/guest
 make install    # build, sign, copy the VMM, the orbit command and scripts to ~/.orbit/bin, install the watchdog
 export PATH="$HOME/.orbit/bin:$PATH"   # put this in your shell profile
-orbit up        # start the VM; first boot installs Docker (~1 min), later boots 2-4 s
+orbit up        # start the VM; first boot installs Docker (~1 min, waits up to 5), later boots 2-4 s
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
 ```
@@ -130,6 +149,14 @@ call it.
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac disk free space at which the VM warns you, and at which it shuts down cleanly before its disk fills. |
 | `ORBIT_INSTANCE` | (unset) | Run a separate VM with its own disk and sockets under `~/.orbit/vmm-<name>`. |
+| `ORBIT_PRESSURE` | (follow the Mac) | `off` stops passing macOS memory pressure to the guest; `warn` or `critical` pins the level (for measurements). |
+| `ORBIT_FS_OWNERSHIP` | (emulated) | `host` shows bind-mounted files with their real Mac owner and mode instead of the emulated ones. |
+| `ORBIT_FS_TTL` / `ORBIT_FS_ATTR_TTL_MS` | `5` / `500` | How long containers cache names (s) and attributes (ms) of bind-mounted files. Lower means Mac edits show sooner, at some speed cost. |
+
+`make guest` (`scripts/fetch-guest.sh`) reads `ALPINE_MIRROR` (default
+`https://dl-cdn.alpinelinux.org/alpine`; the sha256 pins still apply),
+`ORBIT_HOST_CA=0` (see [Root certificates](#root-certificates-tls-inspecting-proxies))
+and `ORBIT_HOME` (build into `<dir>/guest` instead of `~/.orbit/guest`).
 
 ### File sharing
 
@@ -175,6 +202,10 @@ remove the shared directories themselves.
   directory, so `update-ca-certificates` and `apt-get upgrade` work. Neither
   writes the Mac's roots into the image.
 - `ORBIT_HOST_CA=0 make guest && orbit up` builds a guest without them.
+- There is no explicit-proxy support: the guest doesn't use the Mac's
+  HTTP(S) proxy settings or PAC file, and Docker pulls go out directly through
+  the Mac's network. Networks that only allow traffic through an explicit
+  proxy don't work yet; a transparent TLS-inspecting proxy does.
 - Your guest (`~/.orbit/guest`) and data disk then hold your organisation's
   CAs: don't share them outside it.
 
@@ -206,7 +237,7 @@ written, up to its logical size (`vmm-up.sh` prints both). It grows silently,
 so two guards watch the Mac's free space. The supervisor (`vmm-run.sh`)
 notifies you below `ORBIT_WARN_FREE_GB`, and shuts the guest down cleanly below
 `ORBIT_STOP_FREE_GB` (it won't start there either). Under that, as a last
-resort, the VMM checks every 5 seconds:
+resort, the VMM checks every 2 seconds:
 
 - Below `ORBIT_DISK_WARN_MIB`, it logs `orbit-vmm: disk space low` to
   `console.log` (again every 10 minutes while it stays low), and
@@ -331,7 +362,17 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
   running containers, and later commands in the same `RUN` don't see the Mac's
   roots. If something is mounted on the CA directory (`RUN --mount`, `-v`),
   the roots aren't added there.
-- **Missing pieces:** no installer, GUI or Kubernetes.
+- **amd64 images** run under qemu user emulation, not Rosetta, so they are
+  noticeably slower than arm64 ones.
+- **Guest packages:** the kernel and Alpine root filesystem are pinned by
+  sha256, but Docker, qemu and the other guest packages are installed from
+  Alpine's repositories on the first boot after each guest build, so they move
+  with Alpine's updates.
+- **Coming from Docker Desktop or OrbStack:** images, containers and volumes
+  are not migrated. Re-pull images, or move them with `docker save` /
+  `docker load`; copy volume contents with a container that mounts both.
+- **Missing pieces:** no GUI or Kubernetes, and no signed binary release: you
+  build it yourself.
 
 ## How it works
 
@@ -344,6 +385,19 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
           virtio-mmio: blk · net (libslirp) · vsock · fs · balloon (free page reporting)
 ```
 
+## Reporting a bug
+
+Open an [issue](https://github.com/skax-eunsik-kim/orbit-vmm/issues) with what
+you ran, what you expected and what happened, and attach:
+
+- the end of `~/.orbit/vmm/console.log` and `~/.orbit/vmm/watchdog.log`;
+- `sw_vers -productVersion` and `orbit status`;
+- for a crash, the newest `~/.orbit/vmm/crashes/<time>/` directory.
+
+Logs can contain paths and image names; check before posting. Never attach
+`~/.orbit/guest`, `data.img` or `host-ca.pem`: they hold your Mac's extra root
+certificates.
+
 ## Contributing
 
 Bug reports and pull requests are welcome. See
@@ -355,3 +409,6 @@ Report security issues privately ([SECURITY.md](SECURITY.md)).
 Apache-2.0 ([LICENSE](LICENSE)). The guest image you build downloads Alpine
 Linux packages, which carry their own licences; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+orbit-vmm is an independent project. It is not affiliated with Docker, Inc.,
+OrbStack, or Apple.

@@ -333,3 +333,6 @@ Security issues की report निजी तौर पर करें ([SECUR
 Apache-2.0 ([LICENSE](../../../LICENSE))। आप जो guest image build करते हैं, वह Alpine
 Linux packages download करती है, जिनके अपने licences हैं;
 [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md) देखें।
+
+orbit-vmm एक स्वतंत्र project है। यह Docker, Inc.,
+OrbStack, या Apple से संबद्ध नहीं है।

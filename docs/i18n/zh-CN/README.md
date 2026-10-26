@@ -331,3 +331,6 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 Apache-2.0（[LICENSE](../../../LICENSE)）。你构建的客户机镜像会下载 Alpine
 Linux 软件包，这些软件包有各自的许可证；参见
 [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)。
+
+orbit-vmm 是一个独立项目，与 Docker, Inc.、
+OrbStack 或 Apple 均无关联。

@@ -310,3 +310,5 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 
 Apache-2.0([LICENSE](../../../LICENSE)). 빌드하는 게스트 이미지는 Alpine Linux 패키지를 받으며,
 그 패키지에는 각자의 라이선스가 있습니다([THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)).
+
+orbit-vmm 은 독립 프로젝트이며 Docker, Inc., OrbStack, Apple 과 관계가 없습니다.

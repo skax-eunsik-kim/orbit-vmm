@@ -96,7 +96,7 @@ VMs can't share one disk.
 - **Discard.** Guest discards become `F_PUNCHHOLE` on the image, and `memd`
   runs `fstrim /data` after boot and every 10 minutes when the VM is quiet, so
   space Docker frees goes back to the Mac.
-- **Disk guard.** Every 5 s the VMM checks free space on the Mac. Below
+- **Disk guard.** Every 2 s the VMM checks free space on the Mac. Below
   `ORBIT_DISK_WARN_MIB` it logs a warning. Below `ORBIT_DISK_FLOOR_MIB`, or when
   a write fails with ENOSPC, it holds guest writes instead of failing them
   (QEMU's `werror=enospc`) for up to `ORBIT_DISK_PAUSE_SECS`, and resumes once
@@ -112,7 +112,8 @@ VMs can't share one disk.
   above an allowed one can be traversed but not listed.
 - The VMM checks the allowlist itself: entries must be real paths (no
   symlinks, exact case, not nested), and the home directory, anything above
-  it, hidden directories and `~/Library` are refused. The guest can't rename
+  it, hidden directories, `~/Library`, `~/bin` and `~/Applications` are
+  refused. The guest can't rename
   or remove the allowed directories themselves.
 - Directory fds from earlier walks are cached for 1 s, so a path doesn't
   re-open every directory from `/Users` down. The guest's own renames and
@@ -165,7 +166,9 @@ VMs can't share one disk.
 ## Guest (`guest/`)
 
 `scripts/fetch-guest.sh` downloads a pinned Alpine kernel and minirootfs
-(sha256-verified) and builds an initramfs from them plus `guest/`. Alpine
+(sha256-verified) and builds an initramfs from them plus `guest/`. The
+packages the first boot installs (Docker, qemu, …) are not pinned: they come
+from Alpine's repositories at that time. Alpine
 removes old package versions, so the weekly `guest-pins` workflow checks that
 both pinned downloads still exist.
 
@@ -204,10 +207,13 @@ Guest pieces:
   `vmm-run.sh` and `healthcheck.py` to `~/.orbit/bin`, writes
   `~/.orbit/bin/VERSION`, and installs the launchd watchdog. The VM only ever
   runs from that copy: containers can write to the checkout.
-- `vmm-run.sh` supervises the VM, with or without launchd:
-  - It restarts it after a crash, a guest reboot or panic, or a hang (three
-    missed control-socket pings; the VMM is aborted first so macOS writes a
-    crash report).
+- `vmm-run.sh` supervises the VM, with or without launchd. It loads the
+  settings `vmm-up.sh` saved in `config.env` and exports them, since launchd
+  starts it without the user's environment.
+  - It detects a crash, a guest reboot or panic, or a hang (three missed
+    control-socket pings; the VMM is aborted first so macOS writes a crash
+    report). Only under launchd (the watchdog) does the VM then start again;
+    without it, the supervisor records the stop and exits.
   - It stops restarting after more than three starts in 10 minutes.
   - It keeps a record of each unexpected stop in `crashes/<time>/`.
   - It warns below `ORBIT_WARN_FREE_GB` and stops the VM cleanly below

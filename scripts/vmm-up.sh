@@ -49,7 +49,7 @@ if [ -n "${ORBIT_SHARE_ALLOW:-}" ]; then
   done
   ORBIT_SHARE_ALLOW=$abs
 fi
-for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_GUEST ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK ORBIT_WARN_FREE_GB ORBIT_STOP_FREE_GB ORBIT_DISK_WARN_MIB ORBIT_DISK_FLOOR_MIB ORBIT_DISK_PAUSE_SECS ORBIT_PRESSURE; do
+for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_GUEST ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK ORBIT_WARN_FREE_GB ORBIT_STOP_FREE_GB ORBIT_DISK_WARN_MIB ORBIT_DISK_FLOOR_MIB ORBIT_DISK_PAUSE_SECS ORBIT_PRESSURE ORBIT_FS_OWNERSHIP ORBIT_FS_TTL ORBIT_FS_ATTR_TTL_MS; do
   [ -n "${!v:-}" ] && printf '%s=%q\n' "$v" "${!v}"
 done > "$D/config.env"
 
@@ -62,7 +62,8 @@ else
 fi
 
 S="$D/docker.sock"
-for _ in $(seq 1 600); do
+# The first boot installs Docker, which can take minutes on a slow link.
+for _ in $(seq 1 1500); do
   if curl -s -m 2 --unix-socket "$S" http://d/_ping 2>/dev/null | grep -q OK; then
     cat "$D/warnings" >&2 2>/dev/null
     echo "docker ready: export DOCKER_HOST=unix://$S"
@@ -71,4 +72,4 @@ for _ in $(seq 1 600); do
   [ -f "$D/want-running" ] || { echo "VM did not start:" >&2; tail -n 3 "$D/watchdog.log" >&2; echo "see $D/console.log" >&2; exit 1; }
   sleep 0.2
 done
-echo "docker did not come up; see $D/console.log" >&2; exit 1
+echo "docker did not come up within 5 min; the VM keeps booting (see $D/console.log, then orbit status)" >&2; exit 1

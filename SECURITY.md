@@ -58,4 +58,5 @@ These are deliberate trade-offs, documented so you can decide for yourself:
 
 ## Supported versions
 
-Only the latest `main` gets fixes.
+Fixes go into the latest release, which `orbit update` installs; older
+releases don't get backports. `main` may be ahead of the latest release.

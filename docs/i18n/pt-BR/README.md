@@ -355,3 +355,6 @@ privada ([SECURITY.md](../../../SECURITY.md)).
 Apache-2.0 ([LICENSE](../../../LICENSE)). A imagem do guest que você gera baixa pacotes
 do Alpine Linux, que têm as próprias licenças; veja
 [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md).
+
+O orbit-vmm é um projeto independente. Ele não é afiliado à Docker, Inc., à
+OrbStack nem à Apple.
