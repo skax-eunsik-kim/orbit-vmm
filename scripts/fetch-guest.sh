@@ -61,6 +61,7 @@ chmod 755 "$WORK/root/init" "$WORK/root/etc/orbit/"*.sh "$WORK/root/etc/orbit/or
 { echo "$MINIROOT $KVER"; (cd "$ROOT/guest" && find . -type f | sort | xargs cat); cat "$WORK/root/etc/orbit/host-ca.pem"; } \
   | shasum -a 256 | cut -d' ' -f1 > "$WORK/root/etc/orbit/build-id"
 (cd "$WORK/root" && find . | cpio -o -H newc --quiet | gzip -1 > "$OUT/initramfs")
+chmod 600 "$OUT/initramfs"  # holds the Mac's extra roots
 
 echo "$KVER" > "$OUT/version"
 ls -lh "$OUT"

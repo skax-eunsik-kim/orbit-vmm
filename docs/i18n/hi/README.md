@@ -92,7 +92,7 @@ compact करता है (यानी उसे defragment करता ह�
    ~257 MiB पर रुका रहता है, तो इस version पर free हुई guest memory वापस नहीं लौटती: VM Mac पर
    सिर्फ़ बढ़ता ही है।
 2. **Developer workflow।** VM चालू होने पर: `make devflow` को
-   0 fail (25 checks) report करना चाहिए।
+   0 fail (26 checks) report करना चाहिए।
 3. **Activity Monitor।** इसका Memory column VMM का `phys_footprint` है।
    जब Mac पर memory कम होती है, तो macOS guest RAM के एक हिस्से को compress करता है और
    वह संख्या guest के इस्तेमाल से ज़्यादा हो जाती है। Testing में, कुछ भी compressed न होने पर

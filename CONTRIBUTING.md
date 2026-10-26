@@ -57,7 +57,7 @@ relevant checks locally:
 
 | Change | Run |
 |---|---|
-| Anything | `bench/devflow/devflow.sh orbit-vmm -H unix://$HOME/.orbit/vmm/docker.sock` (expect 0 fail, 25 checks) |
+| Anything | `bench/devflow/devflow.sh orbit-vmm -H unix://$HOME/.orbit/vmm/docker.sock` (expect 0 fail, 26 checks) |
 | Memory / balloon / memd | `bench/memtest.sh orbit-vmm unix://$HOME/.orbit/vmm/docker.sock orbit-vmm` and `bench/memfrag.sh <label>` |
 | virtio-fs | `vmm/bench/fssec.sh`, and `make -C vmm ~/.orbit/vmm/fstest.cpio.gz` then boot it |
 | Concurrency / long runs | `bench/stress/multi.sh 4`, `bench/stress/soak.sh 1` |

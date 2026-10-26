@@ -36,7 +36,7 @@ ORBIT_BIN=$HOME/.orbit-x/bin ./scripts/install.sh          # skips the watchdog
 ORBIT_HOME=$HOME/.orbit-x ./scripts/fetch-guest.sh          # guest changes only
 ORBIT_INSTANCE=x ORBIT_GUEST=$HOME/.orbit-x/guest ORBIT_MEM_MIB=4096 ORBIT_CPUS=4 \
   ORBIT_DISK_GB=20 $HOME/.orbit-x/bin/vmm-up.sh
-bench/devflow/devflow.sh x -H unix://$HOME/.orbit/vmm-x/docker.sock   # 25 checks, 0 fail
+bench/devflow/devflow.sh x -H unix://$HOME/.orbit/vmm-x/docker.sock   # 26 checks, 0 fail
 vmm/bench/fssec.sh                                                    # virtio-fs: 23/23
 ORBIT_INSTANCE=x $HOME/.orbit-x/bin/vmm-up.sh --stop; rm -rf ~/.orbit-x ~/.orbit/vmm-x
 ```

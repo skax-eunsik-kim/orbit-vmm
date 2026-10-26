@@ -98,7 +98,7 @@ confiar nele:
    ficar em ~257 MiB, a memória liberada pelo guest não é devolvida nessa
    versão: a VM só cresce no Mac.
 2. **Fluxo de desenvolvimento.** Com a VM no ar: `make devflow` deve reportar
-   0 fail (25 verificações).
+   0 fail (26 verificações).
 3. **Activity Monitor.** A coluna Memory dele é o `phys_footprint` do VMM.
    Quando o Mac está com pouca memória, o macOS comprime parte da RAM do guest
    e esse número passa a ser maior do que o guest usa. Nos testes, a diferença

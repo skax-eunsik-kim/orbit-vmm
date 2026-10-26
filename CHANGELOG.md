@@ -5,6 +5,22 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The CA wrapper's build-step write-back (`orbit-runc`) can no longer reach
+  guest paths outside the build step when an image, or the step itself, makes
+  a parent of a CA directory a symlink: such directories are not bound, and a
+  directory swapped during the step is not written back (#24).
+- Mac roots no longer end up in an image layer when a build step appends to or
+  edits the CA bundle, or copies it within the directory: they are removed
+  from every file before the write-back (#24).
+- The write-back replaces the directory only after a complete copy, and a
+  failed write-back fails the build step instead of committing an empty or
+  partial directory (#24).
+- The built initramfs, which holds the Mac's extra roots, is readable only by
+  its owner. The host roots are no longer appended to the guest bundle twice
+  when booting from the root snapshot.
+
 ### Changed
 
 - `vmm-up.sh` waits up to 5 minutes, not 2, for Docker on the first boot,
@@ -40,6 +56,19 @@ All notable changes are listed here. The format follows
   ignored when launchd started the VM: `vmm-run.sh` loaded `config.env`
   without exporting it. `ORBIT_FS_OWNERSHIP`, `ORBIT_FS_TTL` and
   `ORBIT_FS_ATTR_TTL_MS` are now saved too (#23).
+
+### Fixed
+
+- A first boot whose package install failed (offline, behind a proxy) no
+  longer saves a root snapshot without Docker that every later boot reused.
+  It saves no snapshot and retries next boot, and stage 1 ignores an existing
+  snapshot without `dockerd`, so Macs already stuck recover on their own (#21).
+- A VM that was running at logout or shutdown starts again at login. The
+  supervisor treated launchd's SIGTERM as "stop for good" (#21).
+- Containers get time to stop on `make up`, `make down` and updates. The guest
+  gave dockerd 10 s before killing everything; now dockerd has
+  `shutdown-timeout` 30 s and 45 s in total, and every host-side wait is 75 s
+  (launchd: 90 s) (#21).
 
 ### Docs
 

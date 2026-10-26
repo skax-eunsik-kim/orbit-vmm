@@ -101,7 +101,7 @@ confiar en él:
    ~257 MiB, la memoria liberada del invitado no se devuelve en esta versión:
    la VM solo crece en el Mac.
 2. **Flujo de trabajo de desarrollo.** Con la VM levantada: `make devflow`
-   debe informar 0 fail (25 comprobaciones).
+   debe informar 0 fail (26 comprobaciones).
 3. **Activity Monitor.** Su columna Memory es el `phys_footprint` del VMM.
    Cuando al Mac le falta memoria, macOS comprime parte de la RAM del invitado
    y ese número crece por encima de lo que usa el invitado. En las pruebas la

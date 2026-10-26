@@ -90,7 +90,7 @@ these three things on a new version before relying on it:
    ~257 MiB, freed guest memory isn't returned on this version: the VM only
    grows on the Mac.
 2. **Developer workflow.** With the VM up: `make devflow` must report
-   0 fail (25 checks).
+   0 fail (26 checks).
 3. **Activity Monitor.** Its Memory column is the VMM's `phys_footprint`.
    When the Mac is short on memory, macOS compresses part of guest RAM and
    that number grows past what the guest uses. In testing the gap was near

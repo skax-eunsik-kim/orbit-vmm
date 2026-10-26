@@ -36,7 +36,14 @@ ip link set lo up
 ip link set eth0 up
 udhcpc -i eth0 -q -t 10 -s /etc/orbit/udhcpc.sh >/dev/null 2>&1 || log "dhcp failed"
 log "$(ip -4 -o addr show eth0 | awk '{print $4}') via $(ip route | awk '/default/{print $3}'), dns $(awk '{print $2}' /etc/resolv.conf | tr '\n' ' ')"
-cat /etc/orbit/host-ca.pem >> /etc/ssl/certs/ca-certificates.crt
+# Appends the Mac's roots to the bundle unless every one is already in it
+# (a root snapshot, or update-ca-certificates, has them).
+add_host_ca() {
+  awk 'NR == FNR { if (!/^-----/) { want[$0] = 1; n++ }; next } ($0 in want) { delete want[$0]; n-- } END { exit n > 0 }' \
+    /etc/orbit/host-ca.pem /etc/ssl/certs/ca-certificates.crt \
+    || cat /etc/orbit/host-ca.pem >> /etc/ssl/certs/ca-certificates.crt
+}
+add_host_ca
 # Containers resolve through dnsmasq on the guest's own address (dns.sh), which
 # adds host.docker.internal; keep the DHCP-provided server as its upstream.
 awk '/^nameserver/{print $2; exit}' /etc/resolv.conf > /etc/orbit/upstream-dns
@@ -73,14 +80,18 @@ else
   grep -q '^@docker ' /etc/apk/repositories \
     || sed -n 's|^\(.*/alpine/\)v[0-9.]*/main$|@docker \1v3.23/community|p' /etc/apk/repositories | head -1 >> /etc/apk/repositories
   # Served from /data/apk-cache after the first boot, so later boots work offline.
-  apk add -q docker@docker docker-engine@docker docker-cli@docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq qemu-x86_64 > /dev/hvc0 2>&1 || log "apk add failed"
+  apk add -q docker@docker docker-engine@docker docker-cli@docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq qemu-x86_64 > /dev/hvc0 2>&1 && pkgs=ok || log "apk add failed"
   # ca-certificates (pulled in by docker) regenerates the bundle; persist the host roots through it.
   cp /etc/orbit/host-ca.pem /usr/local/share/ca-certificates/host-ca.crt
   update-ca-certificates >/dev/null 2>&1
-  grep -q "$(sed -n 2p /etc/orbit/host-ca.pem)" /etc/ssl/certs/ca-certificates.crt \
-    || cat /etc/orbit/host-ca.pem >> /etc/ssl/certs/ca-certificates.crt
+  add_host_ca
   resize2fs /dev/vda >/dev/null 2>&1  # first boot: e2fsprogs only now exists
-  /etc/orbit/snapshot.sh && log "saved read-only root snapshot for next boot"
+  # Only a complete install is worth keeping; otherwise the next boot retries.
+  if [ "${pkgs:-}" = ok ] && command -v dockerd >/dev/null; then
+    /etc/orbit/snapshot.sh && log "saved read-only root snapshot for next boot"
+  else
+    log "packages incomplete (offline? proxy?): no root snapshot saved; the next boot retries"
+  fi
 fi
 
 # Compressed swap in RAM: under memory pressure the guest swaps cold pages

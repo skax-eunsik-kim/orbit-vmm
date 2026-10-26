@@ -124,7 +124,7 @@ stop() {
   stopping=1
   log "stop requested; shutting the guest down"
   ctl shutdown >/dev/null
-  for _ in $(seq 1 60); do kill -0 "$P" 2>/dev/null || return; sleep 0.5; done
+  for _ in $(seq 1 150); do kill -0 "$P" 2>/dev/null || return; sleep 0.5; done
   kill -TERM "$P" 2>/dev/null
 }
 trap stop TERM INT
@@ -175,7 +175,10 @@ kill "$W" 2>/dev/null; wait "$W" 2>/dev/null
 
 if [ $stopping = 1 ] || [ $rc = 0 ]; then
   log "VMM $P stopped (status $rc)"
-  rm -f "$D/want-running"
+  # A guest poweroff or `vmm-up.sh --stop` (which already removed it) means
+  # stay down. A signal (launchd at logout or shutdown) does not: keep
+  # want-running so the VM starts again at login.
+  [ $stopping = 1 ] || rm -f "$D/want-running"
   exit 0
 fi
 

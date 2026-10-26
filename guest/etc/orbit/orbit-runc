@@ -15,21 +15,60 @@
 # image's own bundle in place of the merged one: the step's changes land in the
 # layer and the host roots don't. A poststop hook would be too late: BuildKit
 # removes the bundle and rootfs before `runc delete`.
-HOST_CA=/etc/orbit/host-ca.pem
+HOST_CA=${ORBIT_HOST_CA_FILE:-/etc/orbit/host-ca.pem}
+RUNC=${ORBIT_RUNC_BIN:-/usr/bin/runc}   # tests put a stand-in here
+# Paths are split on newlines only and never globbed: mount destinations come
+# from the container's config.
+set -f
+IFS='
+'
+# A path under the rootfs is used only if it resolves to itself: no component
+# is a symlink, so a path built from the image can't reach the guest's own files.
+literal() { [ "$(realpath "$1" 2>/dev/null)" = "$1" ]; }
+# A file without the Mac's roots, whatever else the step did to it (appended
+# its own certificate, copied the bundle): those blocks never reach a layer.
+strip_host_ca() { # <file>
+  awk -v ca="$HOST_CA" '
+    BEGIN { while ((getline l < ca) > 0) { if (l ~ /^-----BEGIN /) b = ""; b = b l "\n"; if (l ~ /^-----END /) host[b] = 1 } }
+    /^-----BEGIN CERTIFICATE-----/ { blk = $0 "\n"; inb = 1; next }
+    inb { blk = blk $0 "\n"; if (/^-----END CERTIFICATE-----/) { inb = 0; if (!(blk in host)) printf "%s", blk }; next }
+    { print }
+    END { if (inb) printf "%s", blk }' "$1"
+}
 # What a directory holds: names, types, modes, owners, link targets and file
 # contents. Not mtimes: the guest clock can step back, so "newer than" misses changes.
 ca_manifest() { (cd "$1" && { find . -exec stat -c '%n %f %u %g %N' {} +; find . -type f -exec md5sum {} +; } | sort); }
-ca_writeback() { # <bundle> <rootfs>
-  for state in "$1"/orbit-cadir-*.state; do
+ca_writeback() { # <bundle> <rootfs>; fails if a directory could not be written back
+  ret=0
+  # (Globbing is off, see above; a while loop keeps ret in this shell.)
+  find "$1" -maxdepth 1 -name 'orbit-cadir-*.state' > "$1/orbit-states"
+  while IFS= read -r state; do
     [ -f "$state" ] || continue
-    read -r dir file < "$state"
+    IFS=' ' read -r dir file < "$state"
     copy=${state%.state}
     # Nothing changed: leave the rootfs alone, so the layer has no diff.
     [ "$(ca_manifest "$copy")" = "$(cat "$copy.before")" ] && continue
     # Bundle untouched by the step: put the image's own back (cp -p keeps its mtime).
     cmp -s "$copy/$file" "$copy.merged" && cp -p "$copy.orig" "$copy/$file"
-    rm -rf "${2:?}$dir" && cp -a "$copy" "$2$dir"
-  done
+    for f in $(grep -rl -- '-----BEGIN CERTIFICATE-----' "$copy" 2>/dev/null); do
+      [ -f "$f" ] && [ ! -L "$f" ] || continue
+      strip_host_ca "$f" > "$copy.strip" && { cmp -s "$f" "$copy.strip" || cat "$copy.strip" > "$f"; }
+    done
+    rm -f "$copy.strip"
+    # The step had a writable rootfs: check again that nothing on the way is a symlink.
+    if ! literal "$2$dir"; then
+      echo "orbit-runc: $dir is no longer a plain directory; not written back" >&2
+      ret=1; continue
+    fi
+    # Copy next to it first, so a failed copy (disk full) leaves the original.
+    new="$2$dir.orbit-new"
+    rm -rf "$new"
+    if cp -a "$copy" "$new" && rm -rf "${2:?}$dir" && mv "$new" "$2$dir"; then :; else
+      echo "orbit-runc: writing $dir back into the build step failed" >&2
+      rm -rf "$new"; ret=1
+    fi
+  done < "$1/orbit-states"
+  return $ret
 }
 bundle=""; is_create=0; is_run=0; prev=""; rw=0
 for a in "$@"; do
@@ -47,13 +86,15 @@ if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -
 "*}; dests=${dests#*"
 "}
   case "$root" in /*) ;; *) root="$bundle/$root" ;; esac
+  root=$(realpath "$root")
   # Only bind over CA bundles the image already has: nothing new is created in
   # its root filesystem, so no trace of the host CA ends up in an image that
   # BuildKit commits from a RUN step (the bind mount itself is never captured).
   # Few processes on purpose: this runs in front of every container start.
   paths=""
   for path in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do
-    [ -f "$root$path" ] && [ ! -L "$root$path" ] && paths="$paths $path"
+    [ -f "$root$path" ] && literal "$root$path" && paths="$paths
+$path"
   done
   binds=""; first=""; n=0
   for path in $paths; do
@@ -69,23 +110,29 @@ if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -
     # a directory bind here would hide that one's.
     for q in $paths; do case "${q%/*}" in "$dir"/*) [ $how = skip ] || how="file" ;; esac; done
     [ $how = skip ] && continue
-    if [ $is_run = 1 ] && [ $how = dir ] && [ -d "$root$dir" ] && [ ! -L "$root$dir" ]; then
+    if [ $is_run = 1 ] && [ $how = dir ] && [ -d "$root$dir" ] && literal "$root$dir"; then
       copy="$bundle/orbit-cadir-$n"
       # cp -a / cp -p keep modes, owners and mtimes.
       cp -a "$root$dir" "$copy" && cp -p "$root$path" "$copy.orig" &&
         cat $HOST_CA >> "$copy/${path##*/}" && cp "$copy/${path##*/}" "$copy.merged" &&
         ca_manifest "$copy" > "$copy.before" &&
-        echo "$dir ${path##*/}" > "$copy.state" && binds="$binds $copy $dir rw" && rw=1
+        echo "$dir ${path##*/}" > "$copy.state" && binds="$binds
+$copy
+$dir
+rw" && rw=1
     else
       copy="$bundle/orbit-ca-$n.pem"
       # cp -p keeps the bundle's mode for the copy.
-      cp -p "$root$path" "$copy" && cat $HOST_CA >> "$copy" && binds="$binds $copy $path ro"
+      cp -p "$root$path" "$copy" && cat $HOST_CA >> "$copy" && binds="$binds
+$copy
+$path
+ro"
     fi
     [ -n "$first" ] || first=$path
   done
   if [ -n "$binds" ]; then
     # Node.js ignores the system store; point it at the merged bundle.
-    # shellcheck disable=SC2086 # the bundle path and CA paths have no spaces
+    # shellcheck disable=SC2086 # split on newlines (IFS above), one field per line
     jq --arg ca "$first" --args '
       $ARGS.positional as $p
       | [range(0; $p | length; 3) | {destination: $p[. + 1], type: "bind", source: $p[.], options: ["rbind", $p[. + 2]]}] as $m
@@ -95,10 +142,11 @@ if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -
       $binds < "$bundle/config.json" > "$bundle/config.json.orbit" && mv "$bundle/config.json.orbit" "$bundle/config.json"
   fi
 fi
-[ $rw = 1 ] || exec /usr/bin/runc "$@"
+[ $rw = 1 ] || exec "$RUNC" "$@"
 # Foreground child, so stdio and the console socket pass through unchanged; if
 # BuildKit kills this wrapper (it kills runc with SIGKILL), runc dies with it.
-setpriv --pdeathsig KILL /usr/bin/runc "$@"
+setpriv --pdeathsig KILL "$RUNC" "$@"
 rc=$?
-ca_writeback "$bundle" "$root"
+# A failed write-back fails the step: BuildKit must not commit a broken layer.
+ca_writeback "$bundle" "$root" || [ $rc != 0 ] || rc=1
 exit $rc

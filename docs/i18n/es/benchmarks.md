@@ -33,7 +33,7 @@ anónima) y 30 s y 90 s después de que el contenedor termine. La tabla muestra 
 
 ## Flujo de trabajo de desarrollo
 
-`bench/devflow/devflow.sh` ejecuta 25 comprobaciones:
+`bench/devflow/devflow.sh` ejecuta 26 comprobaciones:
 
 - compose up con healthchecks, y puertos publicados desde el Mac
 - DNS de servicios y `host.docker.internal`
@@ -44,7 +44,7 @@ anónima) y 30 s y 90 s después de que el contenedor termine. La tabla muestra 
   alembic
 - logs, exec, stats y desfase de reloj
 
-Resultado actual: 25/25 superadas.
+Resultado actual: 26/26 superadas.
 
 ## Estabilidad
 
