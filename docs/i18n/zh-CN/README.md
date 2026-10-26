@@ -16,7 +16,8 @@ orbit-vmm 是一个基于 Apple Hypervisor.framework、用 Rust 编写的小型�
 macOS 上的大多数 Docker 虚拟机会把内存占用涨到峰值后一直停留在那里。
 orbit-vmm 则会把内存还回去。客户机会报告它释放的内存页
 （virtio-balloon *free page reporting*），VMM 在几秒内把这些页释放给 macOS。
-一个小型客户机守护进程还会丢弃空闲的页缓存并整理（compact）内存，
+一个小型客户机守护进程还会丢弃空闲的页缓存并整理（compact）内存
+（对内存进行碎片整理，使整块的空闲内存块能够被报告），
 使释放出来的内存能够真正归还。
 
 > **状态：早期阶段。** 它每天都在运行真实的 compose 栈，但项目还很年轻，
@@ -46,14 +47,32 @@ orbit-vmm 则会把内存还回去。客户机会报告它释放的内存页
     `curl` 在进行 TLS 检查的代理后面也能正常工作。
 - **amd64 镜像** 通过 qemu 用户态模拟（binfmt）运行。
 - **多个虚拟机并行运行**，使用 `ORBIT_INSTANCE=<name>`。
-- **小巧且易于审计。** 单个约 5.5k 行的 Rust 二进制文件。它只依赖
+- **小巧且易于审计。** 单个约 6.3k 行代码的 Rust 二进制文件。它只依赖
   `libc`、`vm-fdt` 和 libslirp，没有其他依赖。
 
 ## 系统要求
 
 - Apple Silicon Mac，macOS 15 或更高版本（内核内 GIC API 需要 15+）。
+  目前仅在 macOS 26.4 上测试过；在其他版本上，请先运行
+  下文的检查。
+- Xcode Command Line Tools（`xcode-select --install`）和
+  [Homebrew](https://brew.sh)。
 - Rust 1.87+ 和 libslirp：`brew install rust libslirp`。
-- 带 compose 插件的 Docker CLI：`brew install docker docker-compose`。
+- 带 compose 和 buildx 插件的 Docker CLI：
+  `brew install docker docker-compose docker-buildx`。Homebrew 会把插件放在
+  CLI 默认不会查找的位置，因此请把它们加入 `~/.docker/config.json`：
+
+  ```json
+  { "cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"] }
+  ```
+
+  没有 buildx 时，`docker build` 会退回到旧版构建器，`make devflow` 中的
+  BuildKit 检查会失败。
+- 可选的健康检查需要 Python 3.11+（`brew install python`）。
+- 可用磁盘空间：Mac 上可用空间少于 3 GB 时虚拟机不会启动，
+  低于 10 GB 时会发出警告（`ORBIT_STOP_FREE_GB` / `ORBIT_WARN_FREE_GB`）。Docker 的
+  数据存放在稀疏文件 `~/.orbit/vmm/data.img` 中，它会随着你拉取和
+  构建镜像而增长。
 
 ### 在 orbit 尚未测试过的 macOS 版本上
 
@@ -85,11 +104,12 @@ macOS，以及活动监视器（Activity Monitor）如何统计它，都由 macO
 ## 快速开始
 
 ```bash
-git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/src/orbit-vmm
-cd ~/src/orbit-vmm
-make guest      # download pinned Alpine kernel + rootfs (sha256-checked) into ~/.orbit/guest
-make install    # build, sign, copy the VMM and scripts to ~/.orbit/bin, install the watchdog
-make up         # start the VM from ~/.orbit/bin; first boot installs Docker (~1 min), later boots 2-4 s
+git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/.local/src/orbit-vmm
+cd ~/.local/src/orbit-vmm
+make guest      # download Alpine kernel + rootfs (pinned, sha256-checked) into ~/.orbit/guest
+make install    # build, sign, copy the VMM, the orbit command and scripts to ~/.orbit/bin, install the watchdog
+export PATH="$HOME/.orbit/bin:$PATH"   # put this in your shell profile
+orbit up        # start the VM; first boot installs Docker (~1 min, waits up to 5), later boots 2-4 s
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
 ```
@@ -101,16 +121,20 @@ docker context create orbit --docker host=unix://$HOME/.orbit/vmm/docker.sock
 docker context use orbit
 ```
 
-`make up`（或 `~/.orbit/bin/vmm-up.sh`）会重启正在运行的虚拟机，这会停止
-其中的所有容器。虚拟机和健康检查只从安装在 `~/.orbit/bin` 中的副本运行。
-容器可以写入你的共享目录，而这个检出目录往往就是其中之一，因此 `make up`
-不会从这里构建或运行任何东西。只有 `make install` 和 `make guest` 会这样做。
-运行它们之前，请确认检出目录没有发生意外变化（`git status`）。更好的做法是把
-检出目录放在共享目录之外。
+`orbit status` 显示已安装的版本以及虚拟机是否正在运行。
+`orbit up` 会重启正在运行的虚拟机，这会停止其中的所有容器。
+
+请像上面那样，把 orbit 克隆到**共享目录之外**（参见
+[文件共享](#文件共享)）。容器可以写入共享目录，因此位于共享目录中的检出
+可能会在你不知情的情况下被修改，而下一次 `make install` 或 `make guest`
+就会在 Mac 上构建并运行这些代码。检出位于共享目录中时，`make install` 会发出警告。
+安装之后，`orbit` 只运行 `~/.orbit/bin` 中已安装的副本，从不运行
+检出目录中的内容；`make up`、`make down`、`make update` 和 `make rollback` 只是
+调用它。
 
 ## 配置
 
-`scripts/vmm-up.sh`（即 `make up` 所运行的脚本）读取以下环境变量：
+`scripts/vmm-up.sh`（即 `orbit up` 所运行的脚本）读取以下环境变量：
 
 | 变量 | 默认值 | 含义 |
 |---|---|---|
@@ -125,6 +149,14 @@ docker context use orbit
 | `ORBIT_HOST_LOOPBACK` | `1` | 设为 `0` 可阻止容器访问 Mac 上 `127.0.0.1`（以及 `host.docker.internal`）的服务。 |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac 磁盘可用空间阈值：分别是虚拟机向你发出警告的阈值，以及在磁盘写满前干净关机的阈值。 |
 | `ORBIT_INSTANCE` | （未设置） | 在 `~/.orbit/vmm-<name>` 下运行一个拥有独立磁盘和 socket 的单独虚拟机。 |
+| `ORBIT_PRESSURE` | （跟随 Mac） | `off` 停止把 macOS 的内存压力传递给客户机；`warn` 或 `critical` 会固定该级别（用于测量）。 |
+| `ORBIT_FS_OWNERSHIP` | （模拟） | `host` 让 bind mount 的文件显示其在 Mac 上真实的所有者和权限模式，而不是模拟值。 |
+| `ORBIT_FS_TTL` / `ORBIT_FS_ATTR_TTL_MS` | `5` / `500` | 容器缓存 bind mount 文件的名称（秒）和属性（毫秒）的时长。值越低，Mac 上的编辑越快可见，但会牺牲一些速度。 |
+
+`make guest`（`scripts/fetch-guest.sh`）读取 `ALPINE_MIRROR`（默认
+`https://dl-cdn.alpinelinux.org/alpine`；sha256 固定校验仍然适用）、
+`ORBIT_HOST_CA=0`（参见[根证书](#根证书进行-tls-检查的代理)）
+和 `ORBIT_HOME`（构建到 `<dir>/guest` 而不是 `~/.orbit/guest`）。
 
 ### 文件共享
 
@@ -133,7 +165,7 @@ docker context use orbit
 不可见。要添加目录：
 
 ```bash
-ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
+ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" orbit up
 ```
 
 共享目录**对所有容器都是可写的**。orbit-vmm 拒绝共享
@@ -169,7 +201,10 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
   证书包中。构建步骤会得到证书包所在目录的一份副本，因此
   `update-ca-certificates` 和 `apt-get upgrade` 可以正常工作。两者都不会
   把 Mac 的根证书写入镜像。
-- `ORBIT_HOST_CA=0 make guest && make up` 会构建一个不含这些证书的客户机。
+- `ORBIT_HOST_CA=0 make guest && orbit up` 会构建一个不含这些证书的客户机。
+- 不支持显式代理：客户机不会使用 Mac 的 HTTP(S) 代理设置或 PAC 文件，
+  Docker 拉取镜像时直接通过 Mac 的网络出站。只允许通过显式代理
+  访问外网的网络目前还无法使用；透明的 TLS 检查代理则可以。
 - 此后你的客户机（`~/.orbit/guest`）和数据磁盘中会包含你所在组织的
   CA：不要把它们分享到组织之外。
 
@@ -201,7 +236,7 @@ python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(
 因此有两道防护监视 Mac 的可用空间。监督进程（`vmm-run.sh`）
 在低于 `ORBIT_WARN_FREE_GB` 时通知你，在低于 `ORBIT_STOP_FREE_GB` 时
 干净地关闭客户机（在该阈值以下也不会启动）。在此之下，作为最后
-手段，VMM 每 5 秒检查一次：
+手段，VMM 每 2 秒检查一次：
 
 - 低于 `ORBIT_DISK_WARN_MIB` 时，它会向 `console.log` 记录 `orbit-vmm: disk space low`
   （空间持续不足期间每 10 分钟记录一次），并且
@@ -222,22 +257,39 @@ python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(
 ## 升级
 
 ```bash
-make update            # the latest release; TO=v0.2.1 for a given one
-make rollback          # back to what was installed before the last update
+orbit update           # the latest release; --to v0.2.1 for a given one
+orbit rollback         # back to what was installed before the last update
 ```
 
-`make update` 在它自己的克隆（`~/.orbit/src`）中构建发布版本，而不是在
-你的检出目录中，并且会在替换任何东西之前先构建新的客户机，因此下载或构建失败
-不会影响已安装的版本。它会保留之前的二进制文件和客户机，供 `make rollback` 使用。
+`orbit update` 在它自己的克隆（`~/.orbit/src`，克隆的是安装时记录的仓库）中构建发布版本，
+而不是在你的检出目录中，并且会在替换任何东西之前先构建新的客户机，因此下载或构建失败
+不会影响已安装的版本。它会保留之前的二进制文件和客户机，供 `orbit rollback` 使用。
 只有在没有容器运行时，它才会重启虚拟机；否则虚拟机会继续使用旧版本，直到
-执行 `make up`（或者运行 `NOW=1 make update`）。客户机升级后的首次启动会
+执行 `orbit up`（或者运行 `orbit update --now`）。客户机升级后的首次启动会
 重新安装客户机软件包（约 1 分钟）。
 
 如果安装了健康检查，它每天会查询一次最新发布版本，
-并针对每个更新的版本显示一条 macOS 通知。不执行 `make update`
+并针对每个更新的版本显示一条 macOS 通知。不执行 `orbit update`
 就不会安装任何东西。
 
-如果想跟随 `main` 而不是发布版本：`git pull && make guest install up`。
+如果想跟随 `main` 而不是发布版本：在你的检出目录中运行
+`git pull && make guest install && orbit up`。
+
+安装的是 v0.2.1 或更早的版本？请在你的检出目录中运行一次 `make update`；
+它会安装 `orbit` 命令。
+
+## 卸载
+
+```bash
+orbit uninstall
+```
+
+它会停止所有 orbit 虚拟机，移除 launchd agent（watchdog 和健康
+检查）、健康检查在你的共享目录中创建的临时目录，以及
+`~/.orbit`，**包括存有所有镜像、容器和卷的数据磁盘**。
+它会先询问你（`--yes` 可跳过询问）。它会保留你的检出目录，
+以及你创建过的名为 `orbit` 的 Docker context
+（`docker context rm orbit`）。
 
 ## Watchdog
 
@@ -265,11 +317,11 @@ ORBIT_WATCHDOG=0 make install          # install without it
   日志）。保留最新的 10 条，并会向你发送 macOS 通知。容器
   会随虚拟机一起停止，因此没有 `restart:` 策略的容器需要重新
   启动。
-- **主动停止：** `make down`（`vmm-up.sh --stop`）和客户机内的 `poweroff`
+- **主动停止：** `orbit down`（`vmm-up.sh --stop`）和客户机内的 `poweroff`
   被视为有意的停止，不会被重启。在你注销时正在运行的虚拟机
   会在登录时再次启动。
 
-没有 watchdog 时，`make up` 会在后台运行同一个监督进程，
+没有 watchdog 时，`orbit up` 会在后台运行同一个监督进程，
 因此卡死仍会被检测到、崩溃仍会被记录，但不会有任何东西被
 重启。
 
@@ -307,7 +359,16 @@ agent，用来运行已安装的 `~/.orbit/bin/healthcheck.py`。它会检查 Do
   运行中的容器里不可行，而且同一个 `RUN` 中后续的命令看不到 Mac 的
   根证书。如果 CA 目录上挂载了其他内容（`RUN --mount`、`-v`），
   根证书就不会被添加到那里。
-- **缺失的部分：** 没有安装程序、GUI 或 Kubernetes。
+- **amd64 镜像** 在 qemu 用户态模拟下运行，而不是 Rosetta，因此明显
+  比 arm64 镜像慢。
+- **客户机软件包：** 内核和 Alpine 根文件系统通过 sha256 固定，
+  但 Docker、qemu 和其他客户机软件包是在每次构建客户机后的首次启动时
+  从 Alpine 的软件仓库安装的，因此会随 Alpine 的更新而变化。
+- **从 Docker Desktop 或 OrbStack 迁移：** 镜像、容器和卷
+  不会被迁移。请重新拉取镜像，或者用 `docker save` /
+  `docker load` 迁移它们；卷的内容可以用一个同时挂载两者的容器来复制。
+- **缺失的部分：** 没有 GUI 或 Kubernetes，也没有签名的二进制发布版本：
+  你需要自己构建。
 
 ## 工作原理
 
@@ -320,6 +381,19 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
           virtio-mmio: blk · net (libslirp) · vsock · fs · balloon (free page reporting)
 ```
 
+## 报告 bug
+
+请提交一个 [issue](https://github.com/skax-eunsik-kim/orbit-vmm/issues)，说明
+你运行了什么、你期望的结果以及实际发生了什么，并附上：
+
+- `~/.orbit/vmm/console.log` 和 `~/.orbit/vmm/watchdog.log` 的末尾部分；
+- `sw_vers -productVersion` 和 `orbit status` 的输出；
+- 如果是崩溃，附上最新的 `~/.orbit/vmm/crashes/<time>/` 目录。
+
+日志中可能包含路径和镜像名称；发布前请检查。切勿附上
+`~/.orbit/guest`、`data.img` 或 `host-ca.pem`：它们包含你的 Mac 额外信任的根
+证书。
+
 ## 参与贡献
 
 欢迎提交 bug 报告和 pull request。开发环境搭建和检查项请参见
@@ -331,3 +405,6 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 Apache-2.0（[LICENSE](../../../LICENSE)）。你构建的客户机镜像会下载 Alpine
 Linux 软件包，这些软件包有各自的许可证；参见
 [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)。
+
+orbit-vmm 是一个独立项目，与 Docker, Inc.、
+OrbStack 或 Apple 均无关联。

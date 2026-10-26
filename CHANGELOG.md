@@ -23,6 +23,9 @@ All notable changes are listed here. The format follows
 
 ### Changed
 
+- `vmm-up.sh` waits up to 5 minutes, not 2, for Docker on the first boot,
+  which installs packages and can be slow on a slow link; when it gives up it
+  says the VM keeps booting (#23).
 - An installed `orbit` command (`~/.orbit/bin/orbit`) runs orbit: `orbit up`,
   `down`, `status`, `update`, `rollback` and `uninstall`. `make up`,
   `make down`, `make update` and `make rollback` now only call it, so nothing
@@ -39,9 +42,20 @@ All notable changes are listed here. The format follows
 - `orbit uninstall`: stops every orbit VM and removes the launchd agents, the
   health check's scratch directories and `~/.orbit` (data disks included),
   after asking (#22).
+- `AGENTS.md` (and a `CLAUDE.md` that imports it): rules for coding agents on
+  verifying changes in an isolated instance, known traps, docs and releases.
+- README in Japanese, Simplified Chinese, Spanish, Brazilian Portuguese,
+  French, German and Hindi, next to English and Korean, with one language
+  selector on all of them (`scripts/readme-langs.py`). CI checks the selector
+  and warns when a PR changes `README.md` but leaves a translation behind.
 
 ### Fixed
 
+- Settings saved for the watchdog that the VMM itself reads
+  (`ORBIT_PRESSURE`, `ORBIT_DISK_FLOOR_MIB`, `ORBIT_DISK_PAUSE_SECS`) were
+  ignored when launchd started the VM: `vmm-run.sh` loaded `config.env`
+  without exporting it. `ORBIT_FS_OWNERSHIP`, `ORBIT_FS_TTL` and
+  `ORBIT_FS_ATTR_TTL_MS` are now saved too (#23).
 - A first boot whose package install failed (offline, behind a proxy) no
   longer saves a root snapshot without Docker that every later boot reused.
   It saves no snapshot and retries next boot, and stage 1 ignores an existing
@@ -55,6 +69,16 @@ All notable changes are listed here. The format follows
 
 ### Docs
 
+- README: complete prerequisites (Xcode Command Line Tools, Homebrew,
+  docker-buildx and the `cliPluginsExtraDirs` setting, Python 3.11+, free
+  disk space), only macOS 26.4 tested so far, every user-facing variable,
+  no explicit-proxy support, unpinned guest packages, moving from Docker
+  Desktop, how to report a bug, and the "not affiliated with Docker, Inc.,
+  OrbStack or Apple" sentence again. Translations updated to match (#23).
+- Corrected: the disk guard checks every 2 s, not 5 s; only the watchdog
+  restarts a crashed VM; the share refusal list includes `~/bin` and
+  `~/Applications`; which benchmark scripts take a Docker host; SECURITY.md
+  supports the latest release, not `main` (#23).
 - `docs/architecture.md` describes the current design again: the data disk
   (discard, disk guard), signals, the directory-fd cache, Docker-event port
   forwarding, DNS, the CA wrapper's build-step handling, and the Mac-side
@@ -67,19 +91,6 @@ All notable changes are listed here. The format follows
   has a README listing what is in it.
 - CI checks every relative link and in-page anchor in the Markdown
   (`scripts/check-doc-links.py`).
-- The README no longer has the "not affiliated with" sentence.
-
-### Added
-
-- `AGENTS.md` (and a `CLAUDE.md` that imports it): rules for coding agents on
-  verifying changes in an isolated instance, known traps, docs and releases.
-
-### Added
-
-- README in Japanese, Simplified Chinese, Spanish, Brazilian Portuguese,
-  French, German and Hindi, next to English and Korean, with one language
-  selector on all of them (`scripts/readme-langs.py`). CI checks the selector
-  and warns when a PR changes `README.md` but leaves a translation behind.
 
 ## [0.2.1] - 2026-10-23
 

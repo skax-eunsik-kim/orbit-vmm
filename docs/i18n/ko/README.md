@@ -16,8 +16,8 @@ Unix 소켓으로 그 게스트와 통신합니다.
 macOS 의 Docker VM 은 대개 가장 많이 쓴 만큼 메모리가 늘어난 채 줄지 않습니다.
 orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 알리면(virtio-balloon
 *free page reporting*) VMM 이 몇 초 안에 macOS 에 돌려줍니다. 게스트의 작은 데몬이
-쓰지 않는 페이지 캐시를 비우고 메모리를 압축 정리해, 해제한 메모리를 실제로 돌려줄 수
-있게 합니다.
+쓰지 않는 페이지 캐시를 비우고 메모리를 컴팩션(조각 모음)해(빈 블록을 통째로 알릴 수
+있도록), 해제한 메모리를 실제로 돌려줄 수 있게 합니다.
 
 > **상태: 초기.** 매일 실제 compose 스택을 돌리고 있지만, 아직 젊은 프로젝트이고
 > 관리자가 한 명이며 설치 프로그램이나 GUI 가 없습니다. 의존하기 전에
@@ -44,14 +44,31 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
     `pip`, `npm`, `apk`, `curl` 이 됩니다.
 - **amd64 이미지**는 qemu 사용자 모드 에뮬레이션(binfmt)으로 돕니다.
 - **VM 여러 개를 나란히** `ORBIT_INSTANCE=<이름>` 으로 띄울 수 있습니다.
-- **작고 검토하기 쉽습니다.** Rust 바이너리 하나, 약 5,500줄입니다. 의존성은 `libc`,
+- **작고 검토하기 쉽습니다.** Rust 바이너리 하나, 코드 약 6,300줄입니다. 의존성은 `libc`,
   `vm-fdt`, libslirp 뿐입니다.
 
 ## 요구 사항
 
 - Apple Silicon Mac, macOS 15 이상(커널 내장 GIC API 가 15 이상을 요구합니다).
+  지금까지 macOS 26.4 에서만 시험했습니다. 다른 버전에서는 먼저 아래 검사를
+  돌리세요.
+- Xcode Command Line Tools(`xcode-select --install`)와
+  [Homebrew](https://brew.sh).
 - Rust 1.87 이상과 libslirp: `brew install rust libslirp`.
-- compose 플러그인이 있는 Docker CLI: `brew install docker docker-compose`.
+- compose 와 buildx 플러그인이 있는 Docker CLI:
+  `brew install docker docker-compose docker-buildx`. Homebrew 는 플러그인을 CLI 가
+  기본으로 찾지 않는 곳에 두므로, `~/.docker/config.json` 에 추가하세요.
+
+  ```json
+  { "cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"] }
+  ```
+
+  buildx 가 없으면 `docker build` 가 예전 빌더로 돌아가고, `make devflow` 의 BuildKit
+  검사가 실패합니다.
+- 선택 사항인 건강 점검에는 Python 3.11 이상(`brew install python`).
+- 디스크 여유 공간: Mac 의 여유 공간이 3 GB 보다 적으면 VM 이 시작하지 않고, 10 GB
+  아래에서는 경고합니다(`ORBIT_STOP_FREE_GB` / `ORBIT_WARN_FREE_GB`). Docker 데이터는
+  희소 파일 `~/.orbit/vmm/data.img` 에 있고, 이미지를 받고 빌드할수록 커집니다.
 
 ### 아직 시험하지 않은 macOS 버전에서
 
@@ -82,11 +99,12 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/src/orbit-vmm
-cd ~/src/orbit-vmm
-make guest      # 고정 버전 Alpine 커널 + rootfs 를 받아(sha256 확인) ~/.orbit/guest 에 빌드
-make install    # 빌드·서명하고 VMM 과 스크립트를 ~/.orbit/bin 에 복사, 워치독 설치
-make up         # ~/.orbit/bin 에서 VM 시작. 첫 부팅은 Docker 설치로 약 1분, 이후 2~4초
+git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/.local/src/orbit-vmm
+cd ~/.local/src/orbit-vmm
+make guest      # Alpine 커널 + rootfs 를 받아(버전 고정, sha256 확인) ~/.orbit/guest 에 빌드
+make install    # 빌드·서명하고 VMM, orbit 명령, 스크립트를 ~/.orbit/bin 에 복사, 워치독 설치
+export PATH="$HOME/.orbit/bin:$PATH"   # 셸 프로필에 넣으세요
+orbit up        # VM 시작. 첫 부팅은 Docker 설치로 약 1분(최대 5분 기다림), 이후 2~4초
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
 ```
@@ -98,17 +116,19 @@ docker context create orbit --docker host=unix://$HOME/.orbit/vmm/docker.sock
 docker context use orbit
 ```
 
-`make up`(또는 `~/.orbit/bin/vmm-up.sh`)은 돌고 있는 VM 을 재기동하므로 그 안의
-컨테이너가 모두 멈춥니다. VM 과 건강 점검은 `~/.orbit/bin` 에 설치된 사본에서만
-돕니다. 컨테이너는 공유 디렉터리에 쓸 수 있고 이 체크아웃도 그중 하나인 경우가 많아서,
-`make up` 은 체크아웃에서 아무것도 빌드하거나 실행하지 않습니다. 그렇게 하는 것은
-`make install` 과 `make guest` 뿐입니다. 그 둘을 돌리기 전에 체크아웃이 뜻밖에
-바뀌지 않았는지(`git status`) 확인하세요. 체크아웃을 공유 디렉터리 밖에 두면 더
-좋습니다.
+`orbit status` 는 설치된 버전과 VM 이 돌고 있는지를 보여 줍니다.
+`orbit up` 은 돌고 있는 VM 을 재기동하므로 그 안의 컨테이너가 모두 멈춥니다.
+
+위처럼 orbit 은 **공유 디렉터리 밖에** 클론하세요([파일 공유](#파일-공유) 참고).
+컨테이너는 공유 디렉터리에 쓸 수 있으므로, 그 안의 체크아웃은 여러분 모르게 바뀔 수
+있고, 다음 `make install` 이나 `make guest` 가 그 코드를 Mac 에서 빌드하고 실행하게
+됩니다. 체크아웃이 공유 디렉터리 안에 있으면 `make install` 이 경고합니다. 설치한 뒤
+`orbit` 은 `~/.orbit/bin` 에 설치된 사본만 실행하고 체크아웃은 실행하지 않습니다.
+`make up`, `make down`, `make update`, `make rollback` 은 그것을 부를 뿐입니다.
 
 ## 설정
 
-`scripts/vmm-up.sh`(`make up` 이 실행하는 것)는 다음 환경 변수를 읽습니다.
+`scripts/vmm-up.sh`(`orbit up` 이 실행하는 것)는 다음 환경 변수를 읽습니다.
 
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
@@ -123,6 +143,14 @@ docker context use orbit
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` 이면 컨테이너가 Mac 의 `127.0.0.1`(과 `host.docker.internal`)의 서비스에 닿지 못합니다. |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac 디스크 여유 공간이 이만큼일 때 VM 이 경고하고, 이만큼일 때 디스크가 차기 전에 깨끗이 종료합니다. |
 | `ORBIT_INSTANCE` | (없음) | `~/.orbit/vmm-<이름>` 아래에 자체 디스크와 소켓을 가진 VM 을 따로 띄웁니다. |
+| `ORBIT_PRESSURE` | (Mac 을 따름) | `off` 면 macOS 메모리 압박을 게스트에 전하지 않고, `warn` 이나 `critical` 은 그 단계로 고정합니다(측정용). |
+| `ORBIT_FS_OWNERSHIP` | (흉내 냄) | `host` 면 bind mount 한 파일을 흉내 낸 값 대신 실제 Mac 소유자와 권한으로 보여 줍니다. |
+| `ORBIT_FS_TTL` / `ORBIT_FS_ATTR_TTL_MS` | `5` / `500` | 컨테이너가 bind mount 한 파일의 이름(초)과 속성(ms)을 캐시하는 시간. 낮추면 Mac 에서 고친 내용이 더 빨리 보이지만 속도가 조금 떨어집니다. |
+
+`make guest`(`scripts/fetch-guest.sh`)는 `ALPINE_MIRROR`(기본값
+`https://dl-cdn.alpinelinux.org/alpine`, sha256 고정은 그대로 적용), `ORBIT_HOST_CA=0`
+([루트 인증서](#루트-인증서tls-검사-프록시) 참고), `ORBIT_HOME`(`~/.orbit/guest` 대신
+`<dir>/guest` 에 빌드)을 읽습니다.
 
 ### 파일 공유
 
@@ -130,7 +158,7 @@ docker context use orbit
 있는 것을 봅니다. `/Users` 의 나머지는 보이지 않습니다. 디렉터리를 더하려면:
 
 ```bash
-ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
+ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" orbit up
 ```
 
 공유 디렉터리는 **모든 컨테이너가 쓸 수 있습니다.** orbit-vmm 은 홈 디렉터리와 그
@@ -163,7 +191,11 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
 - 컨테이너와 빌드 단계는 마운트를 통해 이미지의 CA 번들 뒤에 그 루트가 붙은 것을
   봅니다. 빌드 단계는 번들 디렉터리의 사본을 받으므로 `update-ca-certificates` 와
   `apt-get upgrade` 가 됩니다. 어느 쪽도 Mac 의 루트를 이미지에 쓰지 않습니다.
-- `ORBIT_HOST_CA=0 make guest && make up` 은 루트를 넣지 않은 게스트를 만듭니다.
+- `ORBIT_HOST_CA=0 make guest && orbit up` 은 루트를 넣지 않은 게스트를 만듭니다.
+- 명시적 프록시는 지원하지 않습니다. 게스트는 Mac 의 HTTP(S) 프록시 설정이나 PAC
+  파일을 쓰지 않고, Docker pull 은 Mac 의 네트워크로 바로 나갑니다. 명시적 프록시를
+  거쳐야만 밖으로 나갈 수 있는 네트워크에서는 아직 동작하지 않습니다. 투명한 TLS 검사
+  프록시는 됩니다.
 - 그렇게 만든 게스트(`~/.orbit/guest`)와 데이터 디스크에는 여러분 조직의 CA 가
   들어 있으니, 조직 밖에 공유하지 마세요.
 
@@ -193,7 +225,7 @@ python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(
 (`vmm-up.sh` 가 둘 다 보여 줍니다). 조용히 커지므로 두 가지 장치가 Mac 의 여유 공간을
 지켜봅니다. 감시 프로세스(`vmm-run.sh`)는 `ORBIT_WARN_FREE_GB` 아래에서 알리고,
 `ORBIT_STOP_FREE_GB` 아래에서 게스트를 깨끗이 종료합니다(그 아래에서는 시작도 하지
-않습니다). 그보다 더 아래를 위한 마지막 장치로 VMM 이 5초마다 확인합니다.
+않습니다). 그보다 더 아래를 위한 마지막 장치로 VMM 이 2초마다 확인합니다.
 
 - `ORBIT_DISK_WARN_MIB` 아래이면 `console.log` 에 `orbit-vmm: disk space low` 를
   남기고(낮은 동안 10분마다 다시), `scripts/healthcheck.py` 가 경고합니다.
@@ -212,21 +244,37 @@ python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(
 ## 업그레이드
 
 ```bash
-make update            # 최신 릴리스. 특정 버전은 TO=v0.2.1
-make rollback          # 마지막 업데이트 전에 설치돼 있던 버전으로
+orbit update           # 최신 릴리스. 특정 버전은 --to v0.2.1
+orbit rollback         # 마지막 업데이트 전에 설치돼 있던 버전으로
 ```
 
-`make update` 는 여러분의 체크아웃이 아니라 자체 클론(`~/.orbit/src`)에서 릴리스를
-빌드하고, 무엇이든 바꾸기 전에 새 게스트부터 만듭니다. 그래서 다운로드나 빌드가
-실패하면 설치된 버전이 그대로 남습니다. 직전 바이너리와 게스트를 `make rollback` 용으로
-남겨 둡니다. 컨테이너가 하나도 돌지 않을 때만 VM 을 재기동하고, 아니면 `make up` 할
-때까지 VM 이 옛 버전으로 돕니다(`NOW=1 make update` 로 바로 재기동). 게스트를
-업그레이드한 뒤 첫 부팅은 게스트 패키지를 다시 설치합니다(약 1분).
+`orbit update` 는 여러분의 체크아웃이 아니라, 설치할 때 기록한 저장소의 자체
+클론(`~/.orbit/src`)에서 릴리스를 빌드하고, 무엇이든 바꾸기 전에 새 게스트부터
+만듭니다. 그래서 다운로드나 빌드가 실패하면 설치된 버전이 그대로 남습니다. 직전
+바이너리와 게스트를 `orbit rollback` 용으로 남겨 둡니다. 컨테이너가 하나도 돌지 않을
+때만 VM 을 재기동하고, 아니면 `orbit up` 할 때까지 VM 이 옛 버전으로 돕니다
+(`orbit update --now` 로 바로 재기동). 게스트를 업그레이드한 뒤 첫 부팅은 게스트
+패키지를 다시 설치합니다(약 1분).
 
 건강 점검을 설치했다면 하루 한 번 최신 릴리스를 확인하고, 새 릴리스마다 macOS 알림을
-한 번 보냅니다. `make update` 없이는 아무것도 설치하지 않습니다.
+한 번 보냅니다. `orbit update` 없이는 아무것도 설치하지 않습니다.
 
-릴리스 대신 `main` 을 따라가려면: `git pull && make guest install up`.
+릴리스 대신 `main` 을 따라가려면 체크아웃에서
+`git pull && make guest install && orbit up`.
+
+v0.2.1 이하를 설치했다면 체크아웃에서 `make update` 를 한 번 실행하세요. 그러면
+`orbit` 명령이 설치됩니다.
+
+## 제거
+
+```bash
+orbit uninstall
+```
+
+모든 orbit VM 을 멈추고, launchd 에이전트(워치독과 건강 점검), 공유 디렉터리 안의 건강
+점검 작업 디렉터리, `~/.orbit` 을 지웁니다. **모든 이미지·컨테이너·볼륨이 든 데이터
+디스크도 지웁니다.** 먼저 물어봅니다(`--yes` 로 건너뜀). 체크아웃과, 직접 만들었다면
+`orbit` 이라는 Docker context 는 남깁니다(`docker context rm orbit`).
 
 ## 워치독
 
@@ -250,10 +298,10 @@ ORBIT_WATCHDOG=0 make install          # 워치독 없이 설치
 - **크래시 기록:** 예기치 않은 종료마다 `~/.orbit/vmm/crashes/<시각>/` 에 콘솔 로그,
   macOS 크래시 보고서, 워치독 로그를 남깁니다. 최근 10개를 남기고 macOS 알림을 보냅니다.
   컨테이너는 VM 과 함께 멈추므로 `restart:` 정책이 없는 것은 다시 시작해야 합니다.
-- **의도한 종료:** `make down`(`vmm-up.sh --stop`)과 게스트 `poweroff` 는 의도한 종료로
+- **의도한 종료:** `orbit down`(`vmm-up.sh --stop`)과 게스트 `poweroff` 는 의도한 종료로
   보고 다시 띄우지 않습니다. 로그아웃할 때 돌고 있던 VM 은 로그인할 때 다시 시작합니다.
 
-워치독이 없어도 `make up` 이 같은 감시 프로세스를 백그라운드로 돌리므로, 멈춤을 감지하고
+워치독이 없어도 `orbit up` 이 같은 감시 프로세스를 백그라운드로 돌리므로, 멈춤을 감지하고
 크래시를 기록하지만 다시 띄우지는 않습니다.
 
 ## 건강 점검(선택)
@@ -287,7 +335,16 @@ bind mount, inotify, 게스트 시계를 확인하고, VMM 의 메모리·스레
   복사됩니다. 번들 재생성은 빌드 단계에서는 되지만 실행 중인 컨테이너에서는 안 되고,
   같은 `RUN` 의 뒤쪽 명령은 Mac 의 루트를 보지 못합니다. CA 디렉터리에 무언가가
   마운트돼 있으면(`RUN --mount`, `-v`) 그곳에는 루트를 넣지 않습니다.
-- **빠진 것:** 설치 프로그램, GUI, Kubernetes 가 없습니다.
+- **amd64 이미지**는 Rosetta 가 아니라 qemu 사용자 모드 에뮬레이션으로 돌아서 arm64
+  이미지보다 눈에 띄게 느립니다.
+- **게스트 패키지:** 커널과 Alpine 루트 파일 시스템은 sha256 으로 고정하지만, Docker,
+  qemu 와 다른 게스트 패키지는 게스트를 빌드할 때마다 첫 부팅에서 Alpine 저장소로부터
+  설치하므로 Alpine 업데이트를 따라 바뀝니다.
+- **Docker Desktop 이나 OrbStack 에서 옮겨 올 때:** 이미지, 컨테이너, 볼륨은 옮겨지지
+  않습니다. 이미지를 다시 받거나 `docker save` / `docker load` 로 옮기고, 볼륨 내용은
+  둘을 모두 마운트한 컨테이너로 복사하세요.
+- **빠진 것:** GUI 와 Kubernetes 가 없고, 서명된 바이너리 릴리스도 없습니다. 직접
+  빌드해야 합니다.
 
 ## 동작 방식
 
@@ -300,6 +357,19 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
           virtio-mmio: blk · net (libslirp) · vsock · fs · balloon (free page reporting)
 ```
 
+## 버그 보고
+
+[이슈](https://github.com/skax-eunsik-kim/orbit-vmm/issues)를 열어 무엇을 실행했고, 무엇을
+기대했고, 무슨 일이 일어났는지 적고 다음을 첨부하세요.
+
+- `~/.orbit/vmm/console.log` 와 `~/.orbit/vmm/watchdog.log` 의 끝부분
+- `sw_vers -productVersion` 과 `orbit status`
+- 크래시라면 가장 최근의 `~/.orbit/vmm/crashes/<시각>/` 디렉터리
+
+로그에는 경로와 이미지 이름이 들어 있을 수 있으니 올리기 전에 확인하세요.
+`~/.orbit/guest`, `data.img`, `host-ca.pem` 은 절대 첨부하지 마세요. Mac 이 추가로 신뢰하는
+루트 인증서가 들어 있습니다.
+
 ## 기여
 
 버그 보고와 풀 리퀘스트를 환영합니다. 개발 환경과 검사는
@@ -310,3 +380,5 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 
 Apache-2.0([LICENSE](../../../LICENSE)). 빌드하는 게스트 이미지는 Alpine Linux 패키지를 받으며,
 그 패키지에는 각자의 라이선스가 있습니다([THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md)).
+
+orbit-vmm 은 독립 프로젝트이며 Docker, Inc., OrbStack, Apple 과 관계가 없습니다.

@@ -98,7 +98,7 @@ VM no puedan compartir un mismo disco.
 - **Discard.** Los discards del guest se convierten en `F_PUNCHHOLE` sobre la imagen, y `memd`
   ejecuta `fstrim /data` tras el arranque y cada 10 minutos cuando la VM está tranquila, de modo
   que el espacio que libera Docker vuelve al Mac.
-- **Protección de disco.** Cada 5 s el VMM comprueba el espacio libre en el Mac. Por debajo de
+- **Protección de disco.** Cada 2 s el VMM comprueba el espacio libre en el Mac. Por debajo de
   `ORBIT_DISK_WARN_MIB` registra una advertencia. Por debajo de `ORBIT_DISK_FLOOR_MIB`, o cuando
   una escritura falla con ENOSPC, retiene las escrituras del guest en lugar de hacerlas fallar
   (como el `werror=enospc` de QEMU) durante un máximo de `ORBIT_DISK_PAUSE_SECS`, y las reanuda en cuanto
@@ -114,7 +114,7 @@ VM no puedan compartir un mismo disco.
   por encima de uno permitido se pueden atravesar, pero no listar.
 - El propio VMM comprueba la lista de permitidos: las entradas deben ser rutas reales (sin
   enlaces simbólicos, con las mayúsculas y minúsculas exactas, no anidadas), y se rechazan el directorio personal, cualquier directorio por encima
-  de él, los directorios ocultos y `~/Library`. El guest no puede renombrar
+  de él, los directorios ocultos, `~/Library`, `~/bin` y `~/Applications`. El guest no puede renombrar
   ni eliminar los propios directorios permitidos.
 - Los fds de directorio de recorridos anteriores se guardan en caché durante 1 s, para que una ruta no
   vuelva a abrir cada directorio desde `/Users` hacia abajo. Los renombrados y
@@ -167,7 +167,9 @@ VM no puedan compartir un mismo disco.
 ## Guest (`guest/`)
 
 `scripts/fetch-guest.sh` descarga un kernel y un minirootfs de Alpine con versión fijada
-(verificados con sha256) y construye con ellos, junto con `guest/`, un initramfs. Alpine
+(verificados con sha256) y construye con ellos, junto con `guest/`, un initramfs. Los
+paquetes que instala el primer arranque (Docker, qemu, …) no están fijados: vienen
+de los repositorios de Alpine en ese momento. Alpine
 elimina las versiones antiguas de los paquetes, así que el workflow semanal `guest-pins` comprueba que
 ambas descargas fijadas siguen existiendo.
 
@@ -206,10 +208,13 @@ Componentes del guest:
   `vmm-run.sh` y `healthcheck.py` a `~/.orbit/bin`, escribe
   `~/.orbit/bin/VERSION` e instala el watchdog de launchd. La VM solo se
   ejecuta desde esa copia: los contenedores pueden escribir en el checkout.
-- `vmm-run.sh` supervisa la VM, con o sin launchd:
-  - La reinicia tras un fallo, un reinicio o panic del guest, o un bloqueo (tres
+- `vmm-run.sh` supervisa la VM, con o sin launchd. Carga los ajustes que
+  `vmm-up.sh` guardó en `config.env` y los exporta, ya que launchd lo inicia sin
+  el entorno del usuario.
+  - Detecta un fallo, un reinicio o panic del guest, o un bloqueo (tres
     pings fallidos al socket de control; antes se aborta el VMM para que macOS escriba un
-    informe de fallo).
+    informe de fallo). Solo bajo launchd (el watchdog) la VM vuelve a arrancar
+    después; sin él, el supervisor registra la parada y termina.
   - Deja de reiniciarla tras más de tres arranques en 10 minutos.
   - Guarda un registro de cada parada inesperada en `crashes/<time>/`.
   - Avisa por debajo de `ORBIT_WARN_FREE_GB` y detiene la VM de forma limpia por debajo de
@@ -218,7 +223,12 @@ Componentes del guest:
   el reloj y el espacio en disco, registra la memoria, los hilos y los fds del VMM, y una vez
   al día lee la última versión publicada en la página `releases/latest` y muestra una
   notificación por cada versión más reciente.
-- `update.sh` (`make update`, `make rollback`) compila una etiqueta de versión en su propio
-  clon (`~/.orbit/src`) y el nuevo guest en un directorio de staging, conserva los
+- `orbit` es el comando instalado: `up` y `down` ejecutan `vmm-up.sh`, `update`
+  y `rollback` ejecutan `update.sh`, `status` informa del estado, y `uninstall` elimina los
+  agentes, los directorios temporales de la comprobación de estado y `~/.orbit`. Los
+  objetivos de ejecución del Makefile lo llaman, así que no se ejecuta nada del checkout.
+- `update.sh` (`orbit update`, `orbit rollback`) compila una etiqueta de versión en su propio
+  clon (`~/.orbit/src`) del repositorio registrado en `~/.orbit/bin/VERSION`,
+  y el nuevo guest en un directorio de staging, conserva los
   binarios y el guest anteriores para poder hacer rollback, y reinicia la VM solo cuando no hay
   contenedores en ejecución.

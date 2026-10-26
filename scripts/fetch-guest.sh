@@ -1,7 +1,7 @@
 #!/bin/bash
 # Downloads Alpine's linux-virt kernel + minirootfs and builds the guest
 # boot artifacts in ~/.orbit/guest:
-#   kernel     uncompressed arm64 Image (Virtualization.framework requirement)
+#   kernel     uncompressed arm64 Image (the VMM loads it as is)
 #   initramfs  newc cpio.gz = minirootfs + guest/ overlay + linux-virt.apk (modules)
 set -euo pipefail
 

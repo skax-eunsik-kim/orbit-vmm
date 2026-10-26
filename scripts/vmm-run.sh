@@ -19,9 +19,10 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ -x "$HERE/orbit-vmm" ]; then VMM="$HERE/orbit-vmm"; else VMM="$HERE/../vmm/target/release/orbit-vmm"; fi
 D="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}"
-# Settings vmm-up.sh saved (launchd starts us without the user's environment).
+# Settings vmm-up.sh saved (launchd starts us without the user's environment),
+# exported because the VMM reads some of them itself.
 # shellcheck source=/dev/null
-[ -f "$D/config.env" ] && . "$D/config.env"
+[ -f "$D/config.env" ] && { set -a; . "$D/config.env"; set +a; }
 WLOG="$D/watchdog.log"
 log() { echo "[$(date '+%F %T')] $*" >> "$WLOG"; }
 # Text goes in as arguments, never into the AppleScript source.

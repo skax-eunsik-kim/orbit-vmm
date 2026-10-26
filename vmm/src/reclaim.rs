@@ -3,9 +3,13 @@
 //! Guest RAM comes from hv_vm_allocate (anonymous memory with accurate
 //! accounting). For a range the guest reported free we tell the kernel the
 //! pages' contents are disposable. Strategies (ORBIT_RECLAIM env var):
-//!   reusable (default)  madvise(MADV_FREE_REUSABLE): pages leave the
+//!   fresh (default)     swap the range for untouched anonymous pages
+//!                       (unmap, mmap MAP_FIXED, map back); see
+//!                       replace_with_fresh_pages.
+//!   reusable            madvise(MADV_FREE_REUSABLE): pages leave the
 //!                       footprint right away; the guest touching them again
 //!                       just faults in (possibly zeroed) pages.
+//!   remap               reusable, with the stage-2 mapping dropped around it.
 //!   free                madvise(MADV_FREE): reclaimed only under pressure.
 //!   none                don't release (baseline for measurements).
 

@@ -14,7 +14,9 @@ lines into PRs. Numbers from them are in [docs/benchmarks.md](../docs/benchmarks
 | [`stress/multi.sh`](stress/multi.sh) | N worktrees, each with its own compose stack, in one VM at once. |
 | [`stress/soak.sh`](stress/soak.sh) | Long-running container and file churn, sampling health and resource metrics. |
 
-Each script takes a label and a Docker host or context, so the same run can be
-pointed at an isolated instance:
+`devflow.sh`, `bench.sh`, `memtest.sh` and `stress/multi.sh` take a Docker
+host or context (see each script's usage line), so the same run can be pointed
+at an isolated instance:
 `bench/devflow/devflow.sh x -H unix://$HOME/.orbit/vmm-x/docker.sock`.
+`memfrag.sh` and `stress/soak.sh` always use the default VM (`~/.orbit/vmm`).
 VMM-level tests that boot their own tiny guests are in [`vmm/bench/`](../vmm/bench).

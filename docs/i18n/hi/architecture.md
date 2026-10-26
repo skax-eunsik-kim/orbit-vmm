@@ -98,7 +98,7 @@ VMs एक ही disk share न कर सकें।
 - **Discard.** Guest के discards image पर `F_PUNCHHOLE` बन जाते हैं, और `memd`
   boot के बाद और VM के शांत रहने पर हर 10 minutes में `fstrim /data` चलाता है, ताकि
   Docker जो space free करता है वह Mac को वापस मिल जाए।
-- **Disk guard.** हर 5 s पर VMM, Mac पर free space जाँचता है।
+- **Disk guard.** हर 2 s पर VMM, Mac पर free space जाँचता है।
   `ORBIT_DISK_WARN_MIB` से नीचे होने पर यह एक warning log करता है। `ORBIT_DISK_FLOOR_MIB` से नीचे होने पर, या जब
   कोई write ENOSPC के साथ fail हो, तो यह guest writes को fail करने के बजाय `ORBIT_DISK_PAUSE_SECS` तक
   रोक कर रखता है (QEMU के `werror=enospc` की तरह), और space free होते ही फिर से शुरू कर देता है,
@@ -114,7 +114,7 @@ VMs एक ही disk share न कर सकें।
   के ऊपर की directories traverse की जा सकती हैं, पर list नहीं की जा सकतीं।
 - VMM allowlist को खुद जाँचता है: entries असली paths होनी चाहिए (कोई
   symlinks नहीं, exact case, nested नहीं), और home directory, उसके ऊपर की कोई भी चीज़,
-  hidden directories और `~/Library` अस्वीकार कर दिए जाते हैं। Guest खुद allowed directories को
+  hidden directories, `~/Library`, `~/bin` और `~/Applications` अस्वीकार कर दिए जाते हैं। Guest खुद allowed directories को
   rename या remove नहीं कर सकता।
 - पिछले walks के directory fds 1 s तक cache किए जाते हैं, ताकि कोई path `/Users` से नीचे तक
   हर directory को दोबारा open न करे। Guest के अपने renames और
@@ -166,8 +166,9 @@ VMs एक ही disk share न कर सकें।
 ## Guest (`guest/`)
 
 `scripts/fetch-guest.sh` एक pinned Alpine kernel और minirootfs
-(sha256-verified) download करता है और उनसे तथा `guest/` से एक initramfs build करता है। Alpine
-पुराने package versions हटा देता है, इसलिए साप्ताहिक `guest-pins` workflow जाँचता है कि
+(sha256-verified) download करता है और उनसे तथा `guest/` से एक initramfs build करता है। पहला
+boot जो packages install करता है (Docker, qemu, …) वे pinned नहीं हैं: वे उस समय की Alpine
+repositories से आते हैं। Alpine पुराने package versions हटा देता है, इसलिए साप्ताहिक `guest-pins` workflow जाँचता है कि
 दोनों pinned downloads अब भी मौजूद हैं।
 
 - **पहला boot:** Docker और उससे जुड़े tools को data disk पर install करता है, फिर एक
@@ -205,10 +206,13 @@ Guest के हिस्से:
   `vmm-run.sh` और `healthcheck.py` को `~/.orbit/bin` में copy करता है,
   `~/.orbit/bin/VERSION` लिखता है, और launchd watchdog install करता है। VM हमेशा
   सिर्फ़ उसी copy से चलता है: containers checkout में लिख सकते हैं।
-- `vmm-run.sh` VM को supervise करता है, launchd के साथ या उसके बिना:
+- `vmm-run.sh` VM को supervise करता है, launchd के साथ या उसके बिना। यह `vmm-up.sh` द्वारा
+  `config.env` में save की गई settings load करके export करता है, क्योंकि launchd इसे
+  user के environment के बिना start करता है।
   - यह crash, guest reboot या panic, या hang (तीन
     missed control-socket pings; macOS crash report लिखे इसके लिए VMM को पहले abort किया जाता है)
-    के बाद उसे restart करता है।
+    detect करता है। सिर्फ़ launchd (watchdog) के तहत ही VM फिर से start होता है;
+    उसके बिना, supervisor stop को record करके exit हो जाता है।
   - 10 minutes में तीन से ज़्यादा starts होने के बाद यह restart करना बंद कर देता है।
   - यह हर unexpected stop का record `crashes/<time>/` में रखता है।
   - यह `ORBIT_WARN_FREE_GB` से नीचे warning देता है और `ORBIT_STOP_FREE_GB` से नीचे
@@ -217,6 +221,11 @@ Guest के हिस्से:
   clock और disk space जाँचता है, VMM की memory, threads और fds record करता है, और दिन में
   एक बार `releases/latest` page से latest release पढ़ता है और हर नए release के लिए
   एक notification दिखाता है।
-- `update.sh` (`make update`, `make rollback`) अपने खुद के clone (`~/.orbit/src`) में एक release tag
+- `orbit` installed command है: `up` और `down` `vmm-up.sh` चलाते हैं, `update`
+  और `rollback` `update.sh` चलाते हैं, `status` report करता है, और `uninstall` agents,
+  health check की scratch directories और `~/.orbit` को हटाता है। Makefile के run targets
+  इसे call करते हैं, इसलिए checkout में से कुछ नहीं चलता।
+- `update.sh` (`orbit update`, `orbit rollback`) `~/.orbit/bin/VERSION` में record की गई
+  repository के अपने खुद के clone (`~/.orbit/src`) में एक release tag
   और एक staging directory में नया guest build करता है, rollback के लिए पिछली binaries और guest
   रखता है, और VM को तभी restart करता है जब कोई container न चल रहा हो।

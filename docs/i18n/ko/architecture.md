@@ -94,7 +94,7 @@ working set은 상한과 관계없이 메모리에 남아 있습니다.
 - **Discard.** 게스트의 discard는 이미지에 대한 `F_PUNCHHOLE`이 되고, `memd`가
   부팅 후 그리고 VM이 조용할 때 10분마다 `fstrim /data`를 실행하므로, Docker가 해제한
   공간이 Mac으로 돌아갑니다.
-- **디스크 가드.** VMM은 5 s마다 Mac의 여유 공간을 확인합니다.
+- **디스크 가드.** VMM은 2 s마다 Mac의 여유 공간을 확인합니다.
   `ORBIT_DISK_WARN_MIB` 미만이면 경고를 기록합니다. `ORBIT_DISK_FLOOR_MIB` 미만이거나
   쓰기가 ENOSPC로 실패하면, 게스트 쓰기를 실패시키는 대신 최대 `ORBIT_DISK_PAUSE_SECS`
   동안 보류하고(QEMU의 `werror=enospc`) 공간이 확보되면 재개하므로, ext4는 쓰기 오류를
@@ -109,8 +109,8 @@ working set은 상한과 관계없이 메모리에 남아 있습니다.
   디렉터리(`--share-allow`)를 벗어날 수 없습니다. 허용된 디렉터리의 상위 디렉터리는
   통과할 수는 있지만 목록을 볼 수는 없습니다.
 - VMM은 허용 목록을 직접 검사합니다. 항목은 실제 경로여야 하며(symlink 불가, 대소문자
-  정확히 일치, 중첩 불가), 홈 디렉터리와 그 상위 경로, 숨김 디렉터리, `~/Library`는
-  거부됩니다. 게스트는 허용된 디렉터리 자체의 이름을 바꾸거나 삭제할 수 없습니다.
+  정확히 일치, 중첩 불가), 홈 디렉터리와 그 상위 경로, 숨김 디렉터리, `~/Library`,
+  `~/bin`, `~/Applications`는 거부됩니다. 게스트는 허용된 디렉터리 자체의 이름을 바꾸거나 삭제할 수 없습니다.
 - 이전 탐색에서 연 디렉터리 fd는 1 s 동안 캐시되므로, 경로마다 `/Users`부터 모든
   디렉터리를 다시 열지 않습니다. 게스트 자신의 rename과 rmdir는 항목을 즉시 제거하고,
   만료된 항목은 다음 삽입 때 닫힙니다. 존재하지 않는 경로는 게스트가 1 s 동안
@@ -158,8 +158,9 @@ working set은 상한과 관계없이 메모리에 남아 있습니다.
 ## 게스트 (`guest/`)
 
 `scripts/fetch-guest.sh`는 버전이 고정된 Alpine 커널과 minirootfs를 내려받고
-(sha256 검증), 이것들과 `guest/`로 initramfs를 빌드합니다. Alpine은
-오래된 패키지 버전을 삭제하므로, 매주 실행되는 `guest-pins` workflow가 고정된 두
+(sha256 검증), 이것들과 `guest/`로 initramfs를 빌드합니다. 첫 부팅에서
+설치하는 패키지(Docker, qemu, …)는 고정되지 않으며, 그 시점의 Alpine 저장소에서 받습니다.
+Alpine은 오래된 패키지 버전을 삭제하므로, 매주 실행되는 `guest-pins` workflow가 고정된 두
 다운로드가 아직 존재하는지 확인합니다.
 
 - **첫 부팅:** Docker와 관련 도구를 데이터 디스크에 설치한 뒤 읽기 전용 root
@@ -195,9 +196,12 @@ working set은 상한과 관계없이 메모리에 남아 있습니다.
   `vmm-run.sh`, `healthcheck.py`를 `~/.orbit/bin`에 복사하고,
   `~/.orbit/bin/VERSION`을 작성하고, launchd watchdog을 설치합니다. VM은 항상 그
   사본에서만 실행됩니다. 컨테이너가 checkout에 쓸 수 있기 때문입니다.
-- `vmm-run.sh`는 launchd 유무와 관계없이 VM을 감독합니다.
+- `vmm-run.sh`는 launchd 유무와 관계없이 VM을 감독합니다. launchd는 사용자 환경 없이
+  이를 시작하므로, `vmm-up.sh`가 `config.env`에 저장한 설정을 읽어 export합니다.
   - crash, 게스트 재부팅이나 panic, hang(control socket ping 3회 무응답. 이때는
-    macOS가 crash report를 작성하도록 VMM을 먼저 abort함) 후에 VM을 재시작합니다.
+    macOS가 crash report를 작성하도록 VMM을 먼저 abort함)을 감지합니다. 그 뒤 VM을 다시
+    시작하는 것은 launchd(watchdog) 아래에서뿐이며, 그렇지 않으면 supervisor는 중지를
+    기록하고 종료합니다.
   - 10분 안에 세 번을 넘게 시작되면 재시작을 멈춥니다.
   - 예기치 않은 중지마다 `crashes/<time>/`에 기록을 남깁니다.
   - `ORBIT_WARN_FREE_GB` 미만이면 경고하고, `ORBIT_STOP_FREE_GB` 미만이면 VM을
@@ -206,6 +210,10 @@ working set은 상한과 관계없이 메모리에 남아 있습니다.
   공간을 검사하고, VMM의 메모리, 스레드, fd를 기록하며, 하루에 한 번
   `releases/latest` 페이지에서 최신 릴리스를 읽어 새 릴리스마다 알림을 한 번씩
   표시합니다.
-- `update.sh`(`make update`, `make rollback`)는 자체 clone(`~/.orbit/src`)에서 릴리스
-  태그를, staging 디렉터리에서 새 게스트를 빌드하고, rollback을 위해 이전 바이너리와
+- `orbit`은 설치되는 명령입니다. `up`과 `down`은 `vmm-up.sh`를, `update`와
+  `rollback`은 `update.sh`를 실행하고, `status`는 상태를 보여 주며, `uninstall`은
+  에이전트, 건강 점검의 작업 디렉터리, `~/.orbit`을 제거합니다. Makefile의 실행 타깃은
+  이를 호출하므로 checkout의 어떤 것도 실행되지 않습니다.
+- `update.sh`(`orbit update`, `orbit rollback`)는 `~/.orbit/bin/VERSION`에 기록된
+  저장소의 자체 clone(`~/.orbit/src`)에서 릴리스 태그를, staging 디렉터리에서 새 게스트를 빌드하고, rollback을 위해 이전 바이너리와
   게스트를 보관하며, 실행 중인 컨테이너가 없을 때만 VM을 재시작합니다.
