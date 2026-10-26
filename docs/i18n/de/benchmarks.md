@@ -33,7 +33,7 @@ jeweils 150 MiB halten, gibt jeden zweiten frei und danach den Rest:
 
 ## Entwickler-Workflow
 
-`bench/devflow/devflow.sh` führt 25 Prüfungen aus:
+`bench/devflow/devflow.sh` führt 26 Prüfungen aus:
 
 - compose up mit Healthchecks und vom Mac aus erreichbare veröffentlichte Ports
 - Service-DNS und `host.docker.internal`
@@ -44,7 +44,7 @@ jeweils 150 MiB halten, gibt jeden zweiten frei und danach den Rest:
   alembic-Migration
 - Logs, exec, stats und Clock Skew
 
-Aktuelles Ergebnis: 25/25 bestanden.
+Aktuelles Ergebnis: 26/26 bestanden.
 
 ## Stabilität
 

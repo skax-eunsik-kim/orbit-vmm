@@ -36,7 +36,14 @@ ip link set lo up
 ip link set eth0 up
 udhcpc -i eth0 -q -t 10 -s /etc/orbit/udhcpc.sh >/dev/null 2>&1 || log "dhcp failed"
 log "$(ip -4 -o addr show eth0 | awk '{print $4}') via $(ip route | awk '/default/{print $3}'), dns $(awk '{print $2}' /etc/resolv.conf | tr '\n' ' ')"
-cat /etc/orbit/host-ca.pem >> /etc/ssl/certs/ca-certificates.crt
+# Appends the Mac's roots to the bundle unless every one is already in it
+# (a root snapshot, or update-ca-certificates, has them).
+add_host_ca() {
+  awk 'NR == FNR { if (!/^-----/) { want[$0] = 1; n++ }; next } ($0 in want) { delete want[$0]; n-- } END { exit n > 0 }' \
+    /etc/orbit/host-ca.pem /etc/ssl/certs/ca-certificates.crt \
+    || cat /etc/orbit/host-ca.pem >> /etc/ssl/certs/ca-certificates.crt
+}
+add_host_ca
 # Containers resolve through dnsmasq on the guest's own address (dns.sh), which
 # adds host.docker.internal; keep the DHCP-provided server as its upstream.
 awk '/^nameserver/{print $2; exit}' /etc/resolv.conf > /etc/orbit/upstream-dns
@@ -77,8 +84,7 @@ else
   # ca-certificates (pulled in by docker) regenerates the bundle; persist the host roots through it.
   cp /etc/orbit/host-ca.pem /usr/local/share/ca-certificates/host-ca.crt
   update-ca-certificates >/dev/null 2>&1
-  grep -q "$(sed -n 2p /etc/orbit/host-ca.pem)" /etc/ssl/certs/ca-certificates.crt \
-    || cat /etc/orbit/host-ca.pem >> /etc/ssl/certs/ca-certificates.crt
+  add_host_ca
   resize2fs /dev/vda >/dev/null 2>&1  # first boot: e2fsprogs only now exists
   /etc/orbit/snapshot.sh && log "saved read-only root snapshot for next boot"
 fi

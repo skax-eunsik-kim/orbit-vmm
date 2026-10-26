@@ -33,7 +33,7 @@
 
 ## 개발자 워크플로
 
-`bench/devflow/devflow.sh`는 25개 항목을 검사합니다.
+`bench/devflow/devflow.sh`는 26개 항목을 검사합니다.
 
 - healthcheck를 포함한 compose up, Mac에서 접근하는 published port
 - 서비스 DNS와 `host.docker.internal`
@@ -44,7 +44,7 @@
   마이그레이션
 - logs, exec, stats, 시계 오차
 
-현재 결과: 25/25 통과.
+현재 결과: 26/26 통과.
 
 ## 안정성
 
