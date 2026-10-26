@@ -95,7 +95,7 @@ control vsock で `pressure normal|warn|critical` を送ります。変化があ
 - **Discard。** ゲストの discard はイメージ上の `F_PUNCHHOLE` になります。また `memd` は
   起動後と、VM が静かなときに 10 分ごとに `fstrim /data` を実行するため、Docker が解放した
   領域は Mac に戻ります。
-- **ディスクガード。** VMM は 5 s ごとに Mac の空き容量を確認します。
+- **ディスクガード。** VMM は 2 s ごとに Mac の空き容量を確認します。
   `ORBIT_DISK_WARN_MIB` を下回ると警告をログに出します。`ORBIT_DISK_FLOOR_MIB` を下回るか、
   書き込みが ENOSPC で失敗すると、ゲストの書き込みを失敗させる代わりに最大
   `ORBIT_DISK_PAUSE_SECS` の間保留し（QEMU の `werror=enospc`）、空き容量ができたら再開します。
@@ -111,7 +111,7 @@ control vsock で `pressure normal|warn|critical` を送ります。変化があ
   ディレクトリより上位のディレクトリは通過できますが、一覧表示はできません。
 - VMM は許可リストを自身で検査します。エントリは実在のパスである必要があり（シンボリック
   リンク不可、大文字小文字の完全一致、入れ子不可）、ホームディレクトリ、その上位のすべて、
-  隠しディレクトリ、`~/Library` は拒否されます。ゲストは許可されたディレクトリそのものを
+  隠しディレクトリ、`~/Library`、`~/bin`、`~/Applications` は拒否されます。ゲストは許可されたディレクトリそのものを
   名前変更したり削除したりできません。
 - 以前のパス探索で得たディレクトリ fd は 1 s キャッシュされるため、パスごとに `/Users` から
   下のすべてのディレクトリを開き直すことはありません。ゲスト自身による rename と rmdir は
@@ -163,8 +163,9 @@ control vsock で `pressure normal|warn|critical` を送ります。変化があ
 ## ゲスト（`guest/`）
 
 `scripts/fetch-guest.sh` は、バージョンを固定した Alpine のカーネルと minirootfs を
-（sha256 で検証して）ダウンロードし、それらと `guest/` から initramfs をビルドします。Alpine は
-古いパッケージバージョンを削除するため、毎週実行される `guest-pins` ワークフローで、固定した
+（sha256 で検証して）ダウンロードし、それらと `guest/` から initramfs をビルドします。初回起動で
+インストールされるパッケージ（Docker、qemu など）は固定されておらず、その時点の Alpine の
+リポジトリから取得されます。Alpine は古いパッケージバージョンを削除するため、毎週実行される `guest-pins` ワークフローで、固定した
 2 つのダウンロードがまだ存在するかを確認しています。
 
 - **初回起動:** Docker と関連ツールをデータディスクにインストールし、その後
@@ -203,10 +204,12 @@ control vsock で `pressure normal|warn|critical` を送ります。変化があ
   `vmm-run.sh`、`healthcheck.py` を `~/.orbit/bin` にコピーし、
   `~/.orbit/bin/VERSION` を書き出して、launchd のウォッチドッグをインストールします。VM は
   常にそのコピーから実行されます。コンテナはチェックアウトに書き込めるためです。
-- `vmm-run.sh` は、launchd の有無にかかわらず VM を監視します。
+- `vmm-run.sh` は、launchd の有無にかかわらず VM を監視します。launchd はユーザーの環境なしで
+  これを起動するため、`vmm-up.sh` が `config.env` に保存した設定を読み込んで export します。
   - クラッシュ、ゲストの再起動やパニック、ハング（control ソケットへの ping に 3 回応答が
-    ない場合。macOS がクラッシュレポートを書くよう、先に VMM を abort します）の後に、VM を
-    再起動します。
+    ない場合。macOS がクラッシュレポートを書くよう、先に VMM を abort します）を検出します。
+    その後 VM を再び起動するのは launchd（ウォッチドッグ）の下にいる場合だけで、そうでなければ
+    スーパーバイザーは停止を記録して終了します。
   - 10 分間に 3 回を超えて起動すると、再起動をやめます。
   - 予期しない停止のたびに、その記録を `crashes/<time>/` に残します。
   - `ORBIT_WARN_FREE_GB` を下回ると警告し、`ORBIT_STOP_FREE_GB` を下回ると VM を
@@ -215,6 +218,10 @@ control vsock で `pressure normal|warn|critical` を送ります。変化があ
   時刻、ディスク容量を確認し、VMM のメモリ、スレッド数、fd 数を記録します。また 1 日に
   1 回 `releases/latest` ページから最新リリースを読み取り、新しいリリースごとに 1 回通知を
   表示します。
-- `update.sh`（`make update`、`make rollback`）は、専用のクローン（`~/.orbit/src`）で
-  リリースタグをビルドし、新しいゲストをステージングディレクトリでビルドします。ロールバック
+- `orbit` はインストールされるコマンドです。`up` と `down` は `vmm-up.sh` を、`update` と
+  `rollback` は `update.sh` を実行し、`status` は状態を報告し、`uninstall` はエージェント、
+  ヘルスチェックの作業ディレクトリ、`~/.orbit` を削除します。Makefile の実行ターゲットは
+  これを呼び出すため、チェックアウト内のものは何も実行されません。
+- `update.sh`（`orbit update`、`orbit rollback`）は、`~/.orbit/bin/VERSION` に記録された
+  リポジトリの専用クローン（`~/.orbit/src`）でリリースタグをビルドし、新しいゲストをステージングディレクトリでビルドします。ロールバック
   用に以前のバイナリとゲストを保持し、コンテナが 1 つも動いていないときにだけ VM を再起動します。

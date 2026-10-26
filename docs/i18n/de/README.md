@@ -18,8 +18,9 @@ Die meisten Docker-VMs unter macOS wachsen bis zu ihrem Spitzenverbrauch an
 Speicher und bleiben dort. orbit-vmm gibt Speicher zurück. Der Gast meldet die
 Seiten, die er freigibt (virtio-balloon *Free Page Reporting*), und der VMM gibt
 sie innerhalb von Sekunden an macOS zurück. Ein kleiner Daemon im Gast verwirft
-außerdem ungenutzten Page Cache und kompaktiert den Speicher, damit
-freigegebener Speicher tatsächlich zurückgegeben werden kann.
+außerdem ungenutzten Page Cache und kompaktiert den Speicher (defragmentiert
+ihn, damit ganze freie Blöcke gemeldet werden können), damit freigegebener
+Speicher tatsächlich zurückgegeben werden kann.
 
 > **Status: früh.** Es betreibt täglich echte Compose-Stacks, ist aber jung,
 > hat einen einzigen Maintainer und weder Installer noch GUI. Vor dem Einsatz
@@ -50,14 +51,33 @@ freigegebener Speicher tatsächlich zurückgegeben werden kann.
     `apk` und `curl` hinter TLS-inspizierenden Proxys funktionieren.
 - **amd64-Images** laufen über qemu-User-Emulation (binfmt).
 - **Mehrere VMs nebeneinander** mit `ORBIT_INSTANCE=<name>`.
-- **Klein und überprüfbar.** Ein einzelnes Rust-Binary mit etwa 5.5k Zeilen. Es
+- **Klein und überprüfbar.** Ein einzelnes Rust-Binary mit etwa 6.3k Zeilen Code. Es
   hängt von `libc`, `vm-fdt` und libslirp ab, sonst von nichts.
 
 ## Voraussetzungen
 
 - Mac mit Apple Silicon, macOS 15 oder neuer (die In-Kernel-GIC-API erfordert 15+).
+  Bisher wurde nur macOS 26.4 getestet; auf einer anderen Version zuerst die
+  Prüfungen unten ausführen.
+- Xcode Command Line Tools (`xcode-select --install`) und
+  [Homebrew](https://brew.sh).
 - Rust 1.87+ und libslirp: `brew install rust libslirp`.
-- Docker-CLI mit dem Compose-Plugin: `brew install docker docker-compose`.
+- Docker-CLI mit den Plugins Compose und Buildx:
+  `brew install docker docker-compose docker-buildx`. Homebrew legt die Plugins
+  dort ab, wo die CLI standardmäßig nicht sucht, daher sie in
+  `~/.docker/config.json` eintragen:
+
+  ```json
+  { "cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"] }
+  ```
+
+  Ohne Buildx fällt `docker build` auf den alten Builder zurück, und die
+  BuildKit-Prüfungen in `make devflow` schlagen fehl.
+- Python 3.11+ für den optionalen Health Check (`brew install python`).
+- Freier Speicherplatz: Die VM startet nicht mit weniger als 3 GB frei auf dem
+  Mac und warnt unterhalb von 10 GB (`ORBIT_STOP_FREE_GB` / `ORBIT_WARN_FREE_GB`).
+  Die Daten von Docker liegen in einer Sparse-Datei `~/.orbit/vmm/data.img`, die
+  mit jedem Pull und Build wächst.
 
 ### Auf einer macOS-Version, auf der orbit noch nicht getestet wurde
 
@@ -91,11 +111,12 @@ macOS. Daher vor dem Einsatz auf einer neuen Version diese drei Punkte prüfen:
 ## Schnellstart
 
 ```bash
-git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/src/orbit-vmm
-cd ~/src/orbit-vmm
-make guest      # download pinned Alpine kernel + rootfs (sha256-checked) into ~/.orbit/guest
-make install    # build, sign, copy the VMM and scripts to ~/.orbit/bin, install the watchdog
-make up         # start the VM from ~/.orbit/bin; first boot installs Docker (~1 min), later boots 2-4 s
+git clone https://github.com/skax-eunsik-kim/orbit-vmm ~/.local/src/orbit-vmm
+cd ~/.local/src/orbit-vmm
+make guest      # download Alpine kernel + rootfs (pinned, sha256-checked) into ~/.orbit/guest
+make install    # build, sign, copy the VMM, the orbit command and scripts to ~/.orbit/bin, install the watchdog
+export PATH="$HOME/.orbit/bin:$PATH"   # put this in your shell profile
+orbit up        # start the VM; first boot installs Docker (~1 min, waits up to 5), later boots 2-4 s
 export DOCKER_HOST=unix://$HOME/.orbit/vmm/docker.sock
 docker run --rm hello-world
 ```
@@ -107,18 +128,22 @@ docker context create orbit --docker host=unix://$HOME/.orbit/vmm/docker.sock
 docker context use orbit
 ```
 
-`make up` (oder `~/.orbit/bin/vmm-up.sh`) startet eine laufende VM neu, wodurch
-alle ihre Container gestoppt werden. Die VM und der Health Check laufen
-ausschließlich aus der installierten Kopie in `~/.orbit/bin`. Container können
-in die freigegebenen Verzeichnisse schreiben, und dieser Checkout liegt oft in
-einem davon, deshalb baut und startet `make up` nichts daraus. Das tun nur
-`make install` und `make guest`. Vor deren Ausführung prüfen, ob sich der
-Checkout unerwartet verändert hat (`git status`). Noch besser: den Checkout
-außerhalb der freigegebenen Verzeichnisse ablegen.
+`orbit status` zeigt die installierte Version und ob die VM läuft.
+`orbit up` startet eine laufende VM neu, wodurch alle ihre Container gestoppt
+werden.
+
+orbit **außerhalb der freigegebenen Verzeichnisse** klonen (siehe
+[Dateifreigabe](#dateifreigabe)), wie oben. Container können in freigegebene
+Verzeichnisse schreiben, daher kann ein Checkout in einem davon unbemerkt
+verändert werden, und das nächste `make install` oder `make guest` würde diesen
+Code auf dem Mac bauen und ausführen. `make install` warnt, wenn der Checkout
+in einem freigegebenen Verzeichnis liegt. Nach der Installation führt `orbit`
+nur die installierten Kopien in `~/.orbit/bin` aus und nie den Checkout;
+`make up`, `make down`, `make update` und `make rollback` rufen es lediglich auf.
 
 ## Konfiguration
 
-`scripts/vmm-up.sh` (das, was `make up` ausführt) liest diese Umgebungsvariablen:
+`scripts/vmm-up.sh` (das, was `orbit up` ausführt) liest diese Umgebungsvariablen:
 
 | Variable | Standard | Bedeutung |
 |---|---|---|
@@ -133,6 +158,14 @@ außerhalb der freigegebenen Verzeichnisse ablegen.
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` verhindert, dass Container Dienste auf `127.0.0.1` des Mac (und `host.docker.internal`) erreichen. |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Freier Speicherplatz auf dem Mac, bei dem die VM warnt bzw. bei dem sie sich sauber herunterfährt, bevor ihr Datenträger vollläuft. |
 | `ORBIT_INSTANCE` | (nicht gesetzt) | Eine separate VM mit eigenem Datenträger und eigenen Sockets unter `~/.orbit/vmm-<name>` betreiben. |
+| `ORBIT_PRESSURE` | (folgt dem Mac) | `off` gibt den Speicherdruck von macOS nicht mehr an den Gast weiter; `warn` oder `critical` legt die Stufe fest (für Messungen). |
+| `ORBIT_FS_OWNERSHIP` | (emuliert) | `host` zeigt per Bind-Mount eingebundene Dateien mit ihrem echten Besitzer und Modus auf dem Mac statt mit den emulierten. |
+| `ORBIT_FS_TTL` / `ORBIT_FS_ATTR_TTL_MS` | `5` / `500` | Wie lange Container Namen (s) und Attribute (ms) per Bind-Mount eingebundener Dateien cachen. Niedrigere Werte machen Änderungen auf dem Mac früher sichtbar, kosten aber etwas Geschwindigkeit. |
+
+`make guest` (`scripts/fetch-guest.sh`) liest `ALPINE_MIRROR` (Standard
+`https://dl-cdn.alpinelinux.org/alpine`; die sha256-Pins gelten weiterhin),
+`ORBIT_HOST_CA=0` (siehe [Root-Zertifikate](#root-zertifikate-tls-inspizierende-proxys))
+und `ORBIT_HOME` (baut nach `<dir>/guest` statt nach `~/.orbit/guest`).
 
 ### Dateifreigabe
 
@@ -141,7 +174,7 @@ Standardmäßig sieht die VM diejenigen von `~/work`, `~/src`, `~/code`, `~/dev`
 unsichtbar. Um Verzeichnisse hinzuzufügen:
 
 ```bash
-ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" make up
+ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" orbit up
 ```
 
 Freigegebene Verzeichnisse sind **für jeden Container beschreibbar**. orbit-vmm
@@ -184,7 +217,12 @@ können die freigegebenen Verzeichnisse selbst weder umbenennen noch entfernen.
   Bundle-Verzeichnisses, sodass `update-ca-certificates` und
   `apt-get upgrade` funktionieren. Keiner von beiden schreibt die Roots des Mac
   in das Image.
-- `ORBIT_HOST_CA=0 make guest && make up` baut einen Gast ohne sie.
+- `ORBIT_HOST_CA=0 make guest && orbit up` baut einen Gast ohne sie.
+- Explizite Proxys werden nicht unterstützt: Der Gast verwendet weder die
+  HTTP(S)-Proxy-Einstellungen des Mac noch dessen PAC-Datei, und Docker-Pulls
+  gehen direkt über das Netzwerk des Mac hinaus. Netzwerke, die Verkehr nur über
+  einen expliziten Proxy zulassen, funktionieren noch nicht; ein transparenter
+  TLS-inspizierender Proxy dagegen schon.
 - Der Gast (`~/.orbit/guest`) und der Datenträger enthalten dann die CAs der
   eigenen Organisation: diese nicht außerhalb davon weitergeben.
 
@@ -217,7 +255,7 @@ aus). Sie wächst unbemerkt, daher überwachen zwei Schutzmechanismen den freien
 Speicherplatz des Mac. Der Supervisor (`vmm-run.sh`) benachrichtigt unterhalb
 von `ORBIT_WARN_FREE_GB` und fährt den Gast unterhalb von `ORBIT_STOP_FREE_GB`
 sauber herunter (dort startet er auch nicht). Darunter prüft der VMM als letzte
-Absicherung alle 5 Sekunden:
+Absicherung alle 2 Sekunden:
 
 - Unterhalb von `ORBIT_DISK_WARN_MIB` schreibt er `orbit-vmm: disk space low`
   in `console.log` (erneut alle 10 Minuten, solange der Platz knapp bleibt), und
@@ -241,24 +279,41 @@ genau der Weg, auf dem eine volle Mac-Festplatte den Gast beschädigt.
 ## Aktualisieren
 
 ```bash
-make update            # the latest release; TO=v0.2.1 for a given one
-make rollback          # back to what was installed before the last update
+orbit update           # the latest release; --to v0.2.1 for a given one
+orbit rollback         # back to what was installed before the last update
 ```
 
-`make update` baut das Release in einem eigenen Klon (`~/.orbit/src`), nicht im
-eigenen Checkout, und baut den neuen Gast, bevor irgendetwas ersetzt wird. Ein
-fehlgeschlagener Download oder Build lässt die installierte Version also
-unverändert. Die vorherigen Binaries und der vorherige Gast werden für
-`make rollback` aufbewahrt. Die VM wird nur neu gestartet, wenn keine Container
-laufen; andernfalls behält die VM die alte Version bis `make up` (oder
-`NOW=1 make update` ausführen). Der erste Boot nach einem Gast-Upgrade
+`orbit update` baut das Release in einem eigenen Klon (`~/.orbit/src`) des bei
+der Installation festgehaltenen Repositorys, nicht im eigenen Checkout, und baut
+den neuen Gast, bevor irgendetwas ersetzt wird. Ein fehlgeschlagener Download
+oder Build lässt die installierte Version also unverändert. Die vorherigen
+Binaries und der vorherige Gast werden für `orbit rollback` aufbewahrt. Die VM
+wird nur neu gestartet, wenn keine Container laufen; andernfalls behält die VM
+die alte Version bis `orbit up` (oder `orbit update --now` ausführen). Der erste Boot nach einem Gast-Upgrade
 installiert die Gastpakete neu (etwa 1 min).
 
 Ist der Health Check installiert, sucht er einmal täglich nach dem neuesten
 Release und zeigt pro neuerem Release eine macOS-Benachrichtigung. Ohne
-`make update` wird nichts installiert.
+`orbit update` wird nichts installiert.
 
-Um `main` statt Releases zu folgen: `git pull && make guest install up`.
+Um `main` statt Releases zu folgen: `git pull && make guest install && orbit up`
+im eigenen Checkout.
+
+v0.2.1 oder älter installiert? Einmal `make update` aus dem Checkout ausführen;
+das installiert den Befehl `orbit`.
+
+## Deinstallation
+
+```bash
+orbit uninstall
+```
+
+Der Befehl stoppt alle orbit-VMs und entfernt die launchd-Agenten (Watchdog und
+Health Check), die Arbeitsverzeichnisse des Health Checks in den freigegebenen
+Verzeichnissen sowie `~/.orbit`, **einschließlich der Datenträger mit allen
+Images, Containern und Volumes**. Vorher fragt er nach (`--yes` überspringt die
+Frage). Der Checkout bleibt erhalten, ebenso ein Docker-Context namens `orbit`,
+falls einer angelegt wurde (`docker context rm orbit`).
 
 ## Watchdog
 
@@ -287,11 +342,11 @@ Eine erneute Installation lässt eine laufende VM unberührt.
   Watchdog-Log). Die 10 neuesten werden behalten, und es erscheint eine
   macOS-Benachrichtigung. Container stoppen mit der VM, daher müssen solche ohne
   `restart:`-Richtlinie erneut gestartet werden.
-- **Absichtlich:** `make down` (`vmm-up.sh --stop`) und ein `poweroff` im Gast
+- **Absichtlich:** `orbit down` (`vmm-up.sh --stop`) und ein `poweroff` im Gast
   gelten als beabsichtigte Stopps und werden nicht neu gestartet. Eine VM, die
   beim Abmelden lief, startet bei der Anmeldung wieder.
 
-Ohne den Watchdog führt `make up` denselben Supervisor im Hintergrund aus, sodass
+Ohne den Watchdog führt `orbit up` denselben Supervisor im Hintergrund aus, sodass
 Hänger weiterhin erkannt und Abstürze weiterhin aufgezeichnet werden, aber
 nichts neu gestartet wird.
 
@@ -335,7 +390,18 @@ stündlich zurück. Zum Entfernen `--uninstall` ausführen.
   Build-Schritten, aber nicht in laufenden Containern, und spätere Befehle im
   selben `RUN` sehen die Roots des Mac nicht. Ist etwas auf das CA-Verzeichnis
   gemountet (`RUN --mount`, `-v`), werden die Roots dort nicht hinzugefügt.
-- **Fehlende Teile:** kein Installer, keine GUI, kein Kubernetes.
+- **amd64-Images** laufen unter qemu-User-Emulation, nicht unter Rosetta, und
+  sind daher spürbar langsamer als arm64-Images.
+- **Gastpakete:** Kernel und Alpine-Root-Dateisystem sind per sha256 gepinnt,
+  aber Docker, qemu und die anderen Gastpakete werden beim ersten Boot nach
+  jedem Gast-Build aus den Alpine-Repositorys installiert und ändern sich daher
+  mit den Updates von Alpine.
+- **Umstieg von Docker Desktop oder OrbStack:** Images, Container und Volumes
+  werden nicht migriert. Images erneut pullen oder mit `docker save` /
+  `docker load` übertragen; Volume-Inhalte mit einem Container kopieren, der
+  beide einbindet.
+- **Fehlende Teile:** keine GUI, kein Kubernetes und kein signiertes
+  Binär-Release: orbit wird selbst gebaut.
 
 ## Funktionsweise
 
@@ -347,6 +413,20 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
           Hypervisor.framework (vCPUs, in-kernel GICv3)
           virtio-mmio: blk · net (libslirp) · vsock · fs · balloon (free page reporting)
 ```
+
+## Fehler melden
+
+Ein [Issue](https://github.com/skax-eunsik-kim/orbit-vmm/issues) eröffnen, mit
+dem, was ausgeführt wurde, was erwartet wurde und was passiert ist, und
+Folgendes anhängen:
+
+- das Ende von `~/.orbit/vmm/console.log` und `~/.orbit/vmm/watchdog.log`;
+- `sw_vers -productVersion` und `orbit status`;
+- bei einem Absturz das neueste Verzeichnis `~/.orbit/vmm/crashes/<time>/`.
+
+Logs können Pfade und Image-Namen enthalten; vor dem Posten prüfen. Niemals
+`~/.orbit/guest`, `data.img` oder `host-ca.pem` anhängen: Sie enthalten die
+zusätzlichen Root-Zertifikate des Mac.
 
 ## Mitwirken
 

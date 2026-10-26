@@ -98,7 +98,7 @@ VMs eine Platte teilen können.
 - **Discard.** Discards des Guests werden zu `F_PUNCHHOLE` auf dem Image, und `memd`
   führt nach dem Boot und alle 10 Minuten, wenn die VM ruhig ist, `fstrim /data` aus, sodass
   Speicherplatz, den Docker freigibt, an den Mac zurückgeht.
-- **Disk Guard.** Alle 5 s prüft der VMM den freien Speicherplatz auf dem Mac. Unterhalb von
+- **Disk Guard.** Alle 2 s prüft der VMM den freien Speicherplatz auf dem Mac. Unterhalb von
   `ORBIT_DISK_WARN_MIB` protokolliert er eine Warnung. Unterhalb von `ORBIT_DISK_FLOOR_MIB` oder wenn
   ein Schreibvorgang mit ENOSPC fehlschlägt, hält er Schreibvorgänge des Guests an, statt sie fehlschlagen zu lassen
   (wie `werror=enospc` bei QEMU), und zwar für bis zu `ORBIT_DISK_PAUSE_SECS`; sobald wieder
@@ -114,7 +114,7 @@ VMs eine Platte teilen können.
   oberhalb eines erlaubten Verzeichnisses können durchlaufen, aber nicht aufgelistet werden.
 - Der VMM prüft die Allowlist selbst: Einträge müssen echte Pfade sein (keine
   Symlinks, exakte Groß-/Kleinschreibung, nicht verschachtelt), und das Home-Verzeichnis, alles oberhalb
-  davon, versteckte Verzeichnisse und `~/Library` werden abgelehnt. Der Guest kann die erlaubten
+  davon, versteckte Verzeichnisse, `~/Library`, `~/bin` und `~/Applications` werden abgelehnt. Der Guest kann die erlaubten
   Verzeichnisse selbst weder umbenennen noch entfernen.
 - Verzeichnis-fds aus früheren Durchläufen werden 1 s lang gecacht, sodass ein Pfad nicht
   jedes Verzeichnis ab `/Users` abwärts erneut öffnet. Eigene Umbenennungen und
@@ -167,7 +167,9 @@ VMs eine Platte teilen können.
 ## Guest (`guest/`)
 
 `scripts/fetch-guest.sh` lädt einen gepinnten Alpine-Kernel und ein Minirootfs herunter
-(per sha256 verifiziert) und baut daraus sowie aus `guest/` ein initramfs. Alpine
+(per sha256 verifiziert) und baut daraus sowie aus `guest/` ein initramfs. Die
+Pakete, die der erste Boot installiert (Docker, qemu, …), sind nicht gepinnt: Sie stammen
+aus den Alpine-Repositorys zum jeweiligen Zeitpunkt. Alpine
 entfernt alte Paketversionen, daher prüft der wöchentliche `guest-pins`-Workflow, dass
 beide gepinnten Downloads noch existieren.
 
@@ -206,10 +208,13 @@ Bestandteile des Guests:
   `vmm-run.sh` und `healthcheck.py` nach `~/.orbit/bin`, schreibt
   `~/.orbit/bin/VERSION` und installiert den launchd-Watchdog. Die VM läuft immer nur
   aus dieser Kopie: Container können in den Checkout schreiben.
-- `vmm-run.sh` überwacht die VM, mit oder ohne launchd:
-  - Es startet sie nach einem Absturz, einem Reboot oder Panic des Guests oder einem Hänger neu (drei
+- `vmm-run.sh` überwacht die VM, mit oder ohne launchd. Es lädt die Einstellungen, die
+  `vmm-up.sh` in `config.env` gespeichert hat, und exportiert sie, da launchd es ohne die
+  Umgebung des Benutzers startet.
+  - Es erkennt einen Absturz, einen Reboot oder Panic des Guests oder einen Hänger (drei
     verpasste Pings auf dem Control-Socket; der VMM wird zuvor abgebrochen, damit macOS einen
-    Crash Report schreibt).
+    Crash Report schreibt). Nur unter launchd (dem Watchdog) wird die VM danach neu gestartet;
+    ohne ihn hält der Supervisor den Stopp fest und beendet sich.
   - Es hört nach mehr als drei Starts innerhalb von 10 Minuten mit dem Neustarten auf.
   - Es hält jeden unerwarteten Stopp in `crashes/<time>/` fest.
   - Es warnt unterhalb von `ORBIT_WARN_FREE_GB` und stoppt die VM unterhalb von
@@ -218,7 +223,12 @@ Bestandteile des Guests:
   die Uhr und den Speicherplatz, erfasst Speicher, Threads und fds des VMM, liest einmal
   täglich das neueste Release von der Seite `releases/latest` und zeigt pro neuerem Release
   eine Benachrichtigung an.
-- `update.sh` (`make update`, `make rollback`) baut ein Release-Tag in einem eigenen
-  Clone (`~/.orbit/src`) und den neuen Guest in einem Staging-Verzeichnis, behält die
+- `orbit` ist der installierte Befehl: `up` und `down` führen `vmm-up.sh` aus, `update`
+  und `rollback` führen `update.sh` aus, `status` gibt den Zustand aus, und `uninstall` entfernt die
+  Agenten, die Arbeitsverzeichnisse des Health Checks und `~/.orbit`. Die Run-Targets des
+  Makefile rufen ihn auf, sodass nichts aus dem Checkout ausgeführt wird.
+- `update.sh` (`orbit update`, `orbit rollback`) baut ein Release-Tag in einem eigenen
+  Clone (`~/.orbit/src`) des in `~/.orbit/bin/VERSION` festgehaltenen Repositorys und den
+  neuen Guest in einem Staging-Verzeichnis, behält die
   vorherigen Binaries und den vorherigen Guest für ein Rollback und startet die VM nur neu, wenn keine
   Container laufen.

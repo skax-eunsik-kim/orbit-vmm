@@ -92,7 +92,7 @@ Mac 内存不足时，macOS 会压缩或交换部分 guest RAM，此时 footprin
 - **Discard。** Guest 的 discard 会转换为对镜像文件的 `F_PUNCHHOLE`，并且 `memd`
   会在启动后以及虚拟机空闲时每 10 分钟运行一次 `fstrim /data`，从而把 Docker
   释放的空间归还给 Mac。
-- **磁盘保护。** VMM 每 5 s 检查一次 Mac 上的可用空间。低于
+- **磁盘保护。** VMM 每 2 s 检查一次 Mac 上的可用空间。低于
   `ORBIT_DISK_WARN_MIB` 时记录警告。低于 `ORBIT_DISK_FLOOR_MIB`，或写入因 ENOSPC
   失败时，它会暂缓 guest 的写入而不是让其失败（相当于 QEMU 的 `werror=enospc`），
   最长 `ORBIT_DISK_PAUSE_SECS`，并在空间释放后恢复，因此 ext4 永远不会遇到写入
@@ -106,7 +106,8 @@ Mac 内存不足时，macOS 会压缩或交换部分 guest RAM，此时 footprin
   无法逃出允许的目录（`--share-allow`）。允许目录的上级目录可以穿越，但不能列出
   内容。
 - VMM 会自行检查允许列表：条目必须是真实路径（不能是符号链接、大小写须完全一致、
-  不能相互嵌套），并且会拒绝主目录、其上级的任何目录、隐藏目录以及 `~/Library`。
+  不能相互嵌套），并且会拒绝主目录、其上级的任何目录、隐藏目录、`~/Library`、`~/bin` 和
+  `~/Applications`。
   Guest 无法重命名或删除允许的目录本身。
 - 先前遍历得到的目录 fd 会缓存 1 s，因此访问一条路径时不必从 `/Users` 开始逐级
   重新打开每个目录。Guest 自己执行的重命名和 rmdir 会立即清除相应条目，过期条目
@@ -153,7 +154,8 @@ Mac 内存不足时，macOS 会压缩或交换部分 guest RAM，此时 footprin
 ## Guest（`guest/`）
 
 `scripts/fetch-guest.sh` 下载固定版本的 Alpine 内核和 minirootfs（经 sha256
-校验），并用它们加上 `guest/` 构建 initramfs。Alpine 会移除旧版本的软件包，
+校验），并用它们加上 `guest/` 构建 initramfs。首次启动时安装的软件包（Docker、
+qemu 等）不是固定版本的：它们来自当时 Alpine 的软件仓库。Alpine 会移除旧版本的软件包，
 因此每周运行的 `guest-pins` workflow 会检查这两个固定版本的下载是否仍然存在。
 
 - **首次启动：** 将 Docker 及相关组件安装到数据盘上，然后创建一个只读的根
@@ -187,9 +189,11 @@ Guest 组件：
 - `make install` 把 VMM、它的 `close()` 拦截库、`vmm-up.sh`、`vmm-run.sh` 和
   `healthcheck.py` 复制到 `~/.orbit/bin`，写入 `~/.orbit/bin/VERSION`，并安装
   launchd 看门狗。虚拟机只会从这份副本运行：容器可以写入源码 checkout。
-- `vmm-run.sh` 负责监管虚拟机，无论是否使用 launchd：
-  - 在崩溃、guest 重启或 panic、或者卡死（连续三次控制套接字 ping 无响应；会先
-    中止 VMM，以便 macOS 写入崩溃报告）之后重启虚拟机。
+- `vmm-run.sh` 负责监管虚拟机，无论是否使用 launchd。它会加载 `vmm-up.sh` 保存在
+  `config.env` 中的设置并导出它们，因为 launchd 启动它时不带用户的环境变量。
+  - 它会检测崩溃、guest 重启或 panic、或者卡死（连续三次控制套接字 ping 无响应；
+    会先中止 VMM，以便 macOS 写入崩溃报告）。只有在 launchd（看门狗）之下，虚拟机
+    才会随后再次启动；没有它时，监管进程会记录这次停止然后退出。
   - 如果 10 分钟内启动超过三次，则停止重启。
   - 每次意外停止都会在 `crashes/<time>/` 中保留一份记录。
   - 可用空间低于 `ORBIT_WARN_FREE_GB` 时发出警告，低于 `ORBIT_STOP_FREE_GB` 时
@@ -197,6 +201,9 @@ Guest 组件：
 - `healthcheck.py`（如已安装）会检查 Docker、端口、bind mount、inotify、时钟和
   磁盘空间，记录 VMM 的内存、线程和 fd，并且每天从 `releases/latest` 页面读取一次
   最新版本，对每个更新的版本显示一次通知。
-- `update.sh`（`make update`、`make rollback`）在自己的 clone（`~/.orbit/src`）中
-  构建发布标签，在暂存目录中构建新的 guest，保留之前的二进制文件和 guest 以便
+- `orbit` 是安装后的命令：`up` 和 `down` 运行 `vmm-up.sh`，`update` 和 `rollback`
+  运行 `update.sh`，`status` 报告状态，`uninstall` 移除 agent、健康检查的临时目录和
+  `~/.orbit`。Makefile 的运行类 target 都调用它，因此不会运行 checkout 中的任何内容。
+- `update.sh`（`orbit update`、`orbit rollback`）在自己的 clone（`~/.orbit/src`，
+  克隆的是 `~/.orbit/bin/VERSION` 中记录的仓库）中构建发布标签，在暂存目录中构建新的 guest，保留之前的二进制文件和 guest 以便
   回滚，并且只在没有容器运行时才重启虚拟机。
