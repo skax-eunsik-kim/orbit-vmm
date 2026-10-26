@@ -5,6 +5,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-26
+
 ### Security
 
 - The CA wrapper's build-step write-back (`orbit-runc`) can no longer reach
