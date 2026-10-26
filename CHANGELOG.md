@@ -56,9 +56,6 @@ All notable changes are listed here. The format follows
   ignored when launchd started the VM: `vmm-run.sh` loaded `config.env`
   without exporting it. `ORBIT_FS_OWNERSHIP`, `ORBIT_FS_TTL` and
   `ORBIT_FS_ATTR_TTL_MS` are now saved too (#23).
-
-### Fixed
-
 - A first boot whose package install failed (offline, behind a proxy) no
   longer saves a root snapshot without Docker that every later boot reused.
   It saves no snapshot and retries next boot, and stage 1 ignores an existing
