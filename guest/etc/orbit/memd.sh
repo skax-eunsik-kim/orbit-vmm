@@ -20,6 +20,11 @@
 #    so the Mac compresses less guest RAM; `memd.sh reclaim <level>` (run by
 #    control.sh on a change) reclaims to the new cap and compacts at once,
 #    dropping the dentry/inode caches too on critical.
+#  - never below the working set: when pages the cap reclaimed come straight
+#    back (workingset refaults, e.g. a Kubernetes control plane or a large
+#    stack under macOS pressure), squeezing only turns into disk reads, which
+#    land in the Mac's own file cache. The cap then holds at the cache's size
+#    and loosens by a quarter each minute without refaults.
 #
 # Tunables (kernel command line): orbit.memd_idle=<s> (30), orbit.memd_quiet=<s>
 # (60), orbit.memd_min_mb=<MiB> (128: leave caches smaller than this alone),
@@ -49,6 +54,7 @@ cpu() { awk '/^cpu /{print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6}' /proc/stat; }
 io() { awk '/^(pgpgin|pgpgout) /{s+=$2} END{print s}' /proc/vmstat; }
 # Reclaimable page cache: tmpfs shows up as Cached too but can't be dropped.
 cached_mb() { awk '/^Cached:/{c=$2} /^Shmem:/{s=$2} END{print int((c-s)/1024)}' /proc/meminfo; }
+refault_mb() { awk '/^workingset_refault_file /{print int($2 / 256)}' /proc/vmstat; }
 log() { echo "[memd] $*" > /dev/hvc0; }
 # Page-cache cap in MiB for the current macOS pressure level (0 = no cap).
 cap_mb() {
@@ -74,6 +80,7 @@ sysctl -qw vm.compaction_proactiveness=50 2>/dev/null
 
 set -- $(cpu); last_total=$1; last_idle=$2
 last_io=$(io)
+last_rf=$(refault_mb); floor=0; reclaimed=0; calm=0
 idle_for=0; quiet_for=0; trimmed=0
 while sleep $INTERVAL; do
   set -- $(cpu); total=$1; idle=$2
@@ -85,12 +92,27 @@ while sleep $INTERVAL; do
   if [ $pct -ge 85 ] && [ $dio -lt $((4096 * INTERVAL)) ]; then quiet_for=$((quiet_for + INTERVAL)); else quiet_for=0; fi
   if [ $pct -ge 95 ] && [ $dio -lt $((1024 * INTERVAL)) ]; then idle_for=$((idle_for + INTERVAL)); else idle_for=0; trimmed=0; fi
 
+  # Refaults right after the last tick's reclaim: the cap is below the
+  # working set. Hold it at the cache's size; loosen once a minute when calm.
+  rf=$(refault_mb); drf=$((rf - last_rf)); last_rf=$rf
+  if [ "$reclaimed" -gt 0 ] && [ $((drf * 2)) -ge "$reclaimed" ] && [ "$drf" -ge 16 ]; then
+    c=$(cached_mb)
+    [ $((c + c / 4)) -gt "$floor" ] && { floor=$((c + c / 4)); log "page cache refaulting (${drf} MiB in ${INTERVAL}s): cap held at ${floor} MiB"; }
+    calm=0
+  elif [ "$floor" -gt 0 ]; then
+    calm=$((calm + INTERVAL))
+    [ $calm -ge 60 ] && { calm=0; floor=$((floor * 3 / 4)); [ "$floor" -ge "$MIN_MB" ] || floor=0; }
+  fi
+  reclaimed=0
+
   # Cap with 25% slack so a cache hovering at the limit isn't reclaimed every tick.
   cap=$(cap_mb)
+  [ "$cap" -gt 0 ] && [ "$floor" -gt "$cap" ] && cap=$floor
   if [ "$cap" -gt 0 ]; then
     c=$(cached_mb)
     if [ "$c" -gt $((cap + cap / 4)) ]; then
       echo "$((c - cap))M" > /sys/fs/cgroup/memory.reclaim 2>/dev/null
+      reclaimed=$((c - cap))
       capped=$((${capped:-0} + c - cap))
     fi
     # One summary line a minute at most, not one per tick.

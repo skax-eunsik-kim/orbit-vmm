@@ -90,7 +90,7 @@ these three things on a new version before relying on it:
    ~257 MiB, freed guest memory isn't returned on this version: the VM only
    grows on the Mac.
 2. **Developer workflow.** With the VM up: `make devflow` must report
-   0 fail (26 checks).
+   0 fail (28 checks).
 3. **Activity Monitor.** Its Memory column is the VMM's `phys_footprint`.
    When the Mac is short on memory, macOS compresses part of guest RAM and
    that number grows past what the guest uses. In testing the gap was near
@@ -197,8 +197,9 @@ remove the shared directories themselves.
   TLS-inspection CA) and builds them into your guest. On a Mac without such
   roots nothing is added, and containers see their images' own bundles.
   The repository and releases contain no certificates.
-- Containers and build steps see those roots appended to the image's CA
-  bundle, through a mount. A build step gets a copy of the bundle's
+- Containers, build steps and Kubernetes pods (`orbit k8s`) see those roots
+  appended to the image's CA bundle, through a mount. That includes RHEL,
+  Fedora and Amazon Linux images, whose bundle paths are symlinks. A build step gets a copy of the bundle's
   directory, so `update-ca-certificates` and `apt-get upgrade` work. Neither
   writes the Mac's roots into the image.
 - `ORBIT_HOST_CA=0 make guest && orbit up` builds a guest without them.
@@ -328,6 +329,32 @@ Without the watchdog, `orbit up` runs the same supervisor in the background,
 so hangs are still detected and crashes still recorded, but nothing is
 restarted.
 
+## Kubernetes
+
+```bash
+brew install kind kubectl
+orbit k8s up                  # a single-node cluster named orbit (about 45 s the first time)
+kubectl --context kind-orbit get nodes
+orbit k8s down                # delete it; its memory goes back to the Mac within ~90 s
+```
+
+`orbit k8s` runs [kind](https://kind.sigs.k8s.io/): the cluster is a
+container in the VM, so it costs nothing until you start it, and nothing is
+added to the guest. What it adds over plain kind is that the node's
+containerd starts pods through orbit's CA wrapper, so pods trust the Mac's
+extra roots (registry pulls, `curl`, Node.js) like containers do.
+`orbit k8s up <name> [kind flags]` makes another cluster or passes flags such
+as `--image kindest/node:v1.33.0`; `orbit k8s status` lists clusters. kind
+adds the `kind-<name>` context to your kubeconfig and makes it current.
+
+- An idle cluster took 1.0–1.7 GB more on the Mac than the VM without it
+  ([benchmarks](docs/benchmarks.md#kubernetes)).
+- Reach services with `kubectl port-forward`; the API server is on the
+  Mac's `127.0.0.1`. Use `kind load docker-image <image> --name orbit` for
+  images you built locally.
+- The cluster survives `orbit up` (the VM restarting) and is deleted by
+  `orbit uninstall`.
+
 ## Health check (optional)
 
 After `make install`, `scripts/install-healthcheck.sh` installs a launchd
@@ -371,8 +398,11 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
 - **Coming from Docker Desktop or OrbStack:** images, containers and volumes
   are not migrated. Re-pull images, or move them with `docker save` /
   `docker load`; copy volume contents with a container that mounts both.
-- **Missing pieces:** no GUI or Kubernetes, and no signed binary release: you
-  build it yourself.
+- **Kubernetes:** only through kind (`orbit k8s`), single node by default.
+  `LoadBalancer` services and `extraPortMappings` from your own kind config
+  are not set up for you.
+- **Missing pieces:** no GUI, and no signed binary release: you build it
+  yourself.
 
 ## How it works
 

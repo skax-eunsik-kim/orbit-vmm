@@ -33,7 +33,7 @@ anônima) e 30 s e 90 s após o container encerrar. A tabela mostra o estado oci
 
 ## Fluxo de trabalho de desenvolvimento
 
-`bench/devflow/devflow.sh` executa 26 verificações:
+`bench/devflow/devflow.sh` executa 28 verificações:
 
 - compose up com healthchecks e portas publicadas acessíveis a partir do Mac
 - DNS de serviços e `host.docker.internal`
@@ -42,9 +42,40 @@ anônima) e 30 s e 90 s após o container encerrar. A tabela mostra o estado oci
 - HTTPS atrás de um proxy TLS e uma imagem amd64
 - um build com BuildKit (`# syntax`, ghcr, cache mounts de apt/uv) e uma migration
   do alembic
+- o wrapper de CA do guest contra etapas de build hostis (diretórios de CA com links simbólicos
+  ou trocados, um disco cheio) e um build RHEL (UBI) cujo bundle é um link simbólico
 - logs, exec, stats e desvio de relógio
 
-Resultado atual: 26/26 passam.
+Resultado atual: 28/28 passam.
+
+## Kubernetes
+
+`bench/k8s/k8s.sh` verifica o `orbit k8s` (kind v0.33, Kubernetes v1.37, um
+nó) e registra o `phys_footprint` do VMM. Três execuções em uma instância
+isolada (8 GiB, 6 vCPUs) no macOS 26.4, série M, 2026-10-27:
+
+| | Execução 1 | Execução 2 | Execução 3 |
+|---|---|---|---|
+| `orbit k8s up` (nó Ready) | 43 s | 45 s | 40 s |
+| VM antes do cluster | 2019 MiB | 2797 MiB | 2300 MiB |
+| Cluster ocioso (60 s) | 3267 MiB | 3757 MiB | 4036 MiB |
+| 20 pods nginx | 4417 MiB | 5247 MiB | 4598 MiB |
+| 60 s após `orbit k8s down` | 2685 MiB | 2302 MiB | 2047 MiB |
+| Escalar de 1 → 20 pods Ready | 14 s | 5 s | 5 s |
+
+"Antes" inclui page cache deixado por execuções anteriores, então varia. Um
+registro separado a cada 30 s mostrou a VM de volta abaixo do tamanho anterior ao
+cluster 90 s depois de ele ser removido (1686 MiB antes, 1468 MiB depois).
+
+Sob pressão de memória "warn" do macOS (fixada com `ORBIT_PRESSURE=warn`), com
+o cluster ocioso, um minuto cada:
+
+| memd | Page cache relido (refault) | Leituras + gravações em disco | Page cache mantido |
+|---|---|---|---|
+| antes do #33 | 2.7 GB | 3.4 GB | 460–510 MiB |
+| depois | 0.09–0.2 GB | 0.14–0.27 GB | cerca de 600 MiB |
+
+Resultado atual: 13/13 passam.
 
 ## Estabilidade
 

@@ -16,7 +16,11 @@
 # layer and the host roots don't. A poststop hook would be too late: BuildKit
 # removes the bundle and rootfs before `runc delete`.
 HOST_CA=${ORBIT_HOST_CA_FILE:-/etc/orbit/host-ca.pem}
-RUNC=${ORBIT_RUNC_BIN:-/usr/bin/runc}   # tests put a stand-in here
+# The guest's runc, or a kind node's when `orbit k8s` makes the node's
+# containerd use this wrapper too (tests put a stand-in in ORBIT_RUNC_BIN).
+if [ -n "${ORBIT_RUNC_BIN:-}" ]; then RUNC=$ORBIT_RUNC_BIN
+elif [ -x /usr/bin/runc ]; then RUNC=/usr/bin/runc
+else RUNC=/usr/local/sbin/runc; fi
 # Paths are split on newlines only and never globbed: mount destinations come
 # from the container's config.
 set -f
@@ -25,6 +29,26 @@ IFS='
 # A path under the rootfs is used only if it resolves to itself: no component
 # is a symlink, so a path built from the image can't reach the guest's own files.
 literal() { [ "$(realpath "$1" 2>/dev/null)" = "$1" ]; }
+# <path> with its symlinks resolved as the container sees them: relative to
+# <root>, and `..` stops at it, so the result names a file inside the rootfs
+# (RHEL, Fedora and Amazon Linux link their bundle paths into ca-trust/).
+in_root() { # <root> <path>
+  todo=${2#/} out="" hops=0
+  while [ -n "$todo" ]; do
+    c=${todo%%/*}
+    case $todo in */*) todo=${todo#*/} ;; *) todo="" ;; esac
+    case $c in "" | .) continue ;; ..) out=${out%/*}; continue ;; esac
+    if [ -L "$1$out/$c" ]; then
+      hops=$((hops + 1)); [ $hops -le 16 ] || return 1
+      t=$(readlink "$1$out/$c") || return 1
+      case $t in /*) out="" ;; esac
+      todo=${t#/}${todo:+/$todo}
+    else
+      out="$out/$c"
+    fi
+  done
+  echo "$out"
+}
 # A file without the Mac's roots, whatever else the step did to it (appended
 # its own certificate, copied the bundle): those blocks never reach a layer.
 strip_host_ca() { # <file>
@@ -93,7 +117,16 @@ if [ $is_create = 1 ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ] && [ -
   # Few processes on purpose: this runs in front of every container start.
   paths=""
   for path in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do
-    [ -f "$root$path" ] && literal "$root$path" && paths="$paths
+    # Cheap test first: most images lack most of these paths. (-e alone would
+    # follow an image's absolute symlink into the guest's own filesystem.)
+    [ -e "$root$path" ] || [ -L "$root$path" ] || [ -L "$root${path%/*}" ] || continue
+    literal "$root$path" || { path=$(in_root "$root" "$path") && literal "$root$path"; } || continue
+    [ -f "$root$path" ] || continue
+    case "$paths
+" in *"
+$path
+"*) continue ;; esac   # two names for one file
+    paths="$paths
 $path"
   done
   binds=""; first=""; n=0

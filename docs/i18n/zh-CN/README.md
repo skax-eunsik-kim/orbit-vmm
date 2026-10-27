@@ -92,7 +92,7 @@ macOS，以及活动监视器（Activity Monitor）如何统计它，都由 macO
    ~257 MiB，说明在该版本上释放的客户机内存不会被归还：虚拟机在 Mac 上只会
    增长。
 2. **开发者工作流。** 在虚拟机运行时：`make devflow` 必须报告
-   0 fail（26 项检查）。
+   0 fail（28 项检查）。
 3. **活动监视器。** 其"内存"列显示的是 VMM 的 `phys_footprint`。
    当 Mac 内存不足时，macOS 会压缩部分客户机 RAM，
    该数值会超过客户机实际使用的量。测试中，在没有任何压缩时差距接近
@@ -197,8 +197,9 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" orbit up
   TLS 检查 CA），并把它们构建进你的客户机。在没有这类根证书的 Mac 上
   不会添加任何内容，容器看到的是其镜像自带的证书包。
   仓库和发布版本中不包含任何证书。
-- 容器和构建步骤会通过挂载看到这些根证书被追加到镜像的 CA
-  证书包中。构建步骤会得到证书包所在目录的一份副本，因此
+- 容器、构建步骤和 Kubernetes pod（`orbit k8s`）会通过挂载看到这些根证书
+  被追加到镜像的 CA 证书包中。这也包括 RHEL、Fedora 和 Amazon Linux 镜像，
+  它们的证书包路径是符号链接。构建步骤会得到证书包所在目录的一份副本，因此
   `update-ca-certificates` 和 `apt-get upgrade` 可以正常工作。两者都不会
   把 Mac 的根证书写入镜像。
 - `ORBIT_HOST_CA=0 make guest && orbit up` 会构建一个不含这些证书的客户机。
@@ -325,6 +326,30 @@ ORBIT_WATCHDOG=0 make install          # install without it
 因此卡死仍会被检测到、崩溃仍会被记录，但不会有任何东西被
 重启。
 
+## Kubernetes
+
+```bash
+brew install kind kubectl
+orbit k8s up                  # a single-node cluster named orbit (about 45 s the first time)
+kubectl --context kind-orbit get nodes
+orbit k8s down                # delete it; its memory goes back to the Mac within ~90 s
+```
+
+`orbit k8s` 运行 [kind](https://kind.sigs.k8s.io/)：集群是虚拟机中的一个
+容器，因此在你启动它之前不占用任何资源，也不会向客户机添加任何内容。
+它相比普通 kind 多做的一点是：节点的 containerd 通过 orbit 的 CA 包装器
+启动 pod，因此 pod 和容器一样信任 Mac 额外的根证书（拉取镜像仓库、`curl`、
+Node.js）。`orbit k8s up <name> [kind flags]` 会创建另一个集群，或传入
+`--image kindest/node:v1.33.0` 之类的参数；`orbit k8s status` 列出集群。
+kind 会把 `kind-<name>` 上下文添加到你的 kubeconfig 中并设为当前上下文。
+
+- 一个空闲集群在 Mac 上比没有它的虚拟机多占用 1.0–1.7 GB
+  （[基准测试](benchmarks.md#kubernetes)）。
+- 用 `kubectl port-forward` 访问服务；API server 位于 Mac 的
+  `127.0.0.1`。对于在本地构建的镜像，请使用
+  `kind load docker-image <image> --name orbit`。
+- 集群在 `orbit up`（虚拟机重启）后依然存在，并会被 `orbit uninstall` 删除。
+
 ## 健康检查（可选）
 
 执行 `make install` 后，`scripts/install-healthcheck.sh` 会安装一个 launchd
@@ -367,7 +392,10 @@ agent，用来运行已安装的 `~/.orbit/bin/healthcheck.py`。它会检查 Do
 - **从 Docker Desktop 或 OrbStack 迁移：** 镜像、容器和卷
   不会被迁移。请重新拉取镜像，或者用 `docker save` /
   `docker load` 迁移它们；卷的内容可以用一个同时挂载两者的容器来复制。
-- **缺失的部分：** 没有 GUI 或 Kubernetes，也没有签名的二进制发布版本：
+- **Kubernetes：** 只能通过 kind（`orbit k8s`）使用，默认为单节点。
+  `LoadBalancer` 服务以及你自己 kind 配置中的 `extraPortMappings`
+  不会自动为你设置。
+- **缺失的部分：** 没有 GUI，也没有签名的二进制发布版本：
   你需要自己构建。
 
 ## 工作原理

@@ -65,6 +65,10 @@ Linux는 파일 데이터를 page cache로 붙잡아 두는데, balloon은 이�
 - macOS가 memory pressure를 보고하는 동안에는 대신 page cache를 256 MiB(warn) 또는
   64 MiB(critical) 미만으로 유지합니다(`orbit.memd_warn_mb`,
   `orbit.memd_crit_mb`).
+- working set 아래로는 절대 줄이지 않습니다. 상한으로 회수한 페이지를 곧바로 다시 읽으면
+  (`workingset_refault_file`) 상한을 cache 크기에 고정하고, refault가 없는 1분마다 4분의
+  1씩 풉니다. 이전에는 macOS "warn" pressure에서 Kubernetes control plane이 1분에 약
+  2.7 GB를 잃고 다시 읽었지만, 지금은 약 0.1–0.2 GB입니다.
 
 `pressure.rs`는 macOS memory pressure를 감시하고(libdispatch memory-pressure
 source와 30 s마다 다시 읽는 `kern.memorystatus_vm_pressure_level`) control vsock으로
@@ -178,7 +182,12 @@ Alpine은 오래된 패키지 버전을 삭제하므로, 매주 실행되는 `gu
   (`scripts/export-host-ca.py`, 보통 회사의 TLS 검사 CA이며, 대부분의 Mac에는 없고
   `ORBIT_HOST_CA=0`이면 내보내지 않음) `/etc/orbit/host-ca.pem`으로 내보냅니다.
   - 컨테이너는 이미지의 CA bundle에 그 인증서를 덧붙인 사본을 받으며, 이 사본은 기존
-    bundle 위에 읽기 전용으로 bind-mount됩니다.
+    bundle 위에 읽기 전용으로 bind-mount됩니다. bundle 경로가 symlink이면(RHEL, Fedora,
+    Amazon Linux는 `ca-trust/`로 링크함) 컨테이너가 보는 방식대로, 그 rootfs 안에서만
+    해석하고, 사본은 링크가 가리키는 파일 위에 올라갑니다.
+  - `orbit k8s`가 만든 kind 노드에서는 노드의 containerd가 같은 wrapper로 파드를
+    실행하므로(`host-ca.pem`과 함께 게스트에서 마운트하고 runc `BinaryName`으로 설정)
+    파드도 같은 처리를 받습니다.
   - 빌드의 `RUN` 단계는 대신 bundle 디렉터리의 읽기/쓰기 사본을 받으므로, rename으로
     bundle을 다시 생성하는 도구도 동작합니다. runc는 자식 프로세스로 실행되며, runc가
     반환되면(BuildKit이 `--keep`을 넘기므로 rootfs는 아직 마운트되어 있음) 내용이
@@ -214,6 +223,8 @@ Alpine은 오래된 패키지 버전을 삭제하므로, 매주 실행되는 `gu
   `rollback`은 `update.sh`를 실행하고, `status`는 상태를 보여 주며, `uninstall`은
   에이전트, 건강 점검의 작업 디렉터리, `~/.orbit`을 제거합니다. Makefile의 실행 타깃은
   이를 호출하므로 checkout의 어떤 것도 실행되지 않습니다.
+  `orbit k8s up|down|status`는 노드를 위와 같이 구성한 kind 클러스터를 만들고 지웁니다.
+  `uninstall`도 클러스터를 지우며, 그때 kubectl 컨텍스트도 함께 사라집니다.
 - `update.sh`(`orbit update`, `orbit rollback`)는 `~/.orbit/bin/VERSION`에 기록된
   저장소의 자체 clone(`~/.orbit/src`)에서 릴리스 태그를, staging 디렉터리에서 새 게스트를 빌드하고, rollback을 위해 이전 바이너리와
   게스트를 보관하며, 실행 중인 컨테이너가 없을 때만 VM을 재시작합니다.

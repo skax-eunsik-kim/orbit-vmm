@@ -67,6 +67,11 @@ O Linux retém dados de arquivos como page cache, que o balloon não consegue re
 - Enquanto o macOS reporta pressão de memória, ele mantém o page cache abaixo de 256 MiB
   (warn) ou 64 MiB (critical) em vez disso (`orbit.memd_warn_mb`,
   `orbit.memd_crit_mb`).
+- Ele nunca aperta abaixo do working set. Quando páginas que o limite recuperou são
+  lidas de volta logo em seguida (`workingset_refault_file`), o limite se fixa no tamanho
+  do cache e afrouxa um quarto a cada minuto sem refaults.
+  Antes disso, um control plane do Kubernetes sob pressão "warn" do macOS perdia
+  e relia cerca de 2.7 GB por minuto; agora, cerca de 0.1–0.2 GB.
 
 `pressure.rs` monitora a pressão de memória do macOS (uma fonte de memory pressure da
 libdispatch, mais `kern.memorystatus_vm_pressure_level` relido a cada 30 s) e
@@ -188,7 +193,13 @@ Componentes do guest:
   (`scripts/export-host-ca.py`, geralmente uma CA corporativa de inspeção TLS; nenhuma na
   maioria dos Macs, e nenhuma com `ORBIT_HOST_CA=0`) para `/etc/orbit/host-ca.pem`.
   - Um container recebe uma cópia do bundle de CAs da imagem com elas acrescentadas,
-    montada via bind mount somente leitura sobre o bundle.
+    montada via bind mount somente leitura sobre o bundle. Um caminho de bundle que é um link
+    simbólico (RHEL, Fedora e Amazon Linux apontam o seu para `ca-trust/`) é resolvido
+    como o container o veria, apenas dentro do seu rootfs, e a cópia
+    é montada sobre o arquivo para o qual ele aponta.
+  - Em um nó do kind criado por `orbit k8s`, o containerd do nó executa os pods
+    pelo mesmo wrapper (montado a partir do guest junto com `host-ca.pem`, e
+    definido como o `BinaryName` do runc), então os pods recebem o mesmo tratamento.
   - Uma etapa `RUN` de build recebe, em vez disso, uma cópia de leitura e escrita do diretório do bundle,
     para que ferramentas que regeneram o bundle por rename funcionem. O runc é executado como
     processo filho; quando ele retorna (o BuildKit passa `--keep`, então o rootfs ainda está
@@ -227,6 +238,9 @@ Componentes do guest:
   e `rollback` executam o `update.sh`, `status` reporta o estado e `uninstall` remove os
   agentes, os diretórios temporários do health check e o `~/.orbit`. Os targets
   de execução do Makefile o chamam, então nada do checkout é executado.
+  `orbit k8s up|down|status` cria e remove clusters do kind com o nó
+  configurado como acima; `uninstall` também os remove, o que também descarta
+  seus contextos do kubectl.
 - `update.sh` (`orbit update`, `orbit rollback`) compila uma tag de release em seu próprio
   clone (`~/.orbit/src`) do repositório registrado em `~/.orbit/bin/VERSION`,
   e o novo guest em um diretório de staging, mantém os

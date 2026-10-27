@@ -31,7 +31,7 @@ memory), and 30 s and 90 s after the container exits. The table shows idle and a
 
 ## Developer workflow
 
-`bench/devflow/devflow.sh` runs 26 checks:
+`bench/devflow/devflow.sh` runs 28 checks:
 
 - compose up with healthchecks, and published ports from the Mac
 - service DNS and `host.docker.internal`
@@ -41,10 +41,40 @@ memory), and 30 s and 90 s after the container exits. The table shows idle and a
 - a BuildKit build (`# syntax`, ghcr, apt/uv cache mounts) and an alembic
   migration
 - the guest's CA wrapper against hostile build steps (symlinked or swapped
-  CA directories, a full disk)
+  CA directories, a full disk), and a RHEL (UBI) build whose bundle is a
+  symlink
 - logs, exec, stats and clock skew
 
-Current result: 26/26 pass.
+Current result: 28/28 pass.
+
+## Kubernetes
+
+`bench/k8s/k8s.sh` checks `orbit k8s` (kind v0.33, Kubernetes v1.37, one
+node) and records the VMM's `phys_footprint`. Three runs on an isolated
+instance (8 GiB, 6 vCPUs) on macOS 26.4, M-series, 2026-10-27:
+
+| | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| `orbit k8s up` (node Ready) | 43 s | 45 s | 40 s |
+| VM before the cluster | 2019 MiB | 2797 MiB | 2300 MiB |
+| Cluster idle (60 s) | 3267 MiB | 3757 MiB | 4036 MiB |
+| 20 nginx pods | 4417 MiB | 5247 MiB | 4598 MiB |
+| 60 s after `orbit k8s down` | 2685 MiB | 2302 MiB | 2047 MiB |
+| Scale 1 → 20 pods Ready | 14 s | 5 s | 5 s |
+
+"Before" includes page cache left by earlier runs, so it varies. A separate
+trace every 30 s showed the VM back below its pre-cluster size 90 s after the
+cluster was deleted (1686 MiB before, 1468 MiB after).
+
+Under macOS "warn" memory pressure (pinned with `ORBIT_PRESSURE=warn`), with
+the cluster idle, one minute each:
+
+| memd | Page cache refaulted | Disk reads + writes | Page cache held |
+|---|---|---|---|
+| before #33 | 2.7 GB | 3.4 GB | 460–510 MiB |
+| after | 0.09–0.2 GB | 0.14–0.27 GB | about 600 MiB |
+
+Current result: 13/13 pass.
 
 ## Stability
 

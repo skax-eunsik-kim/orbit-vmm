@@ -86,7 +86,7 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
    `unmap + mmap(MAP_FIXED anon) + map` 줄이 `released 1 MiB` 근처로 끝나야 합니다.
    VMM 이 쓰는 방식입니다(`vmm/src/reclaim.rs`). 약 257 MiB 에 머물면 그 버전에서는
    해제한 게스트 메모리가 돌아오지 않아, Mac 에서 VM 이 늘기만 합니다.
-2. **개발 흐름.** VM 이 떠 있는 상태에서 `make devflow` 가 실패 0(검사 26개)이어야
+2. **개발 흐름.** VM 이 떠 있는 상태에서 `make devflow` 가 실패 0(검사 28개)이어야
    합니다.
 3. **활성 상태 보기.** 메모리 열은 VMM 의 `phys_footprint` 입니다. Mac 메모리가
    모자라면 macOS 가 게스트 RAM 일부를 압축하고, 그 숫자가 게스트가 실제로 쓰는
@@ -188,8 +188,9 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" orbit up
   것, 보통 회사의 TLS 검사 CA)를 읽어 게스트에 넣습니다. 그런 루트가 없는 Mac 에서는
   아무것도 넣지 않고, 컨테이너는 이미지 자체의 번들을 봅니다. 저장소와 릴리스에는
   인증서가 들어 있지 않습니다.
-- 컨테이너와 빌드 단계는 마운트를 통해 이미지의 CA 번들 뒤에 그 루트가 붙은 것을
-  봅니다. 빌드 단계는 번들 디렉터리의 사본을 받으므로 `update-ca-certificates` 와
+- 컨테이너, 빌드 단계, Kubernetes 파드(`orbit k8s`)는 마운트를 통해 이미지의 CA
+  번들 뒤에 그 루트가 붙은 것을 봅니다. 번들 경로가 심볼릭 링크인 RHEL, Fedora,
+  Amazon Linux 이미지도 마찬가지입니다. 빌드 단계는 번들 디렉터리의 사본을 받으므로 `update-ca-certificates` 와
   `apt-get upgrade` 가 됩니다. 어느 쪽도 Mac 의 루트를 이미지에 쓰지 않습니다.
 - `ORBIT_HOST_CA=0 make guest && orbit up` 은 루트를 넣지 않은 게스트를 만듭니다.
 - 명시적 프록시는 지원하지 않습니다. 게스트는 Mac 의 HTTP(S) 프록시 설정이나 PAC
@@ -304,6 +305,31 @@ ORBIT_WATCHDOG=0 make install          # 워치독 없이 설치
 워치독이 없어도 `orbit up` 이 같은 감시 프로세스를 백그라운드로 돌리므로, 멈춤을 감지하고
 크래시를 기록하지만 다시 띄우지는 않습니다.
 
+## Kubernetes
+
+```bash
+brew install kind kubectl
+orbit k8s up                  # a single-node cluster named orbit (about 45 s the first time)
+kubectl --context kind-orbit get nodes
+orbit k8s down                # delete it; its memory goes back to the Mac within ~90 s
+```
+
+`orbit k8s` 는 [kind](https://kind.sigs.k8s.io/) 를 돌립니다. 클러스터는 VM 안의
+컨테이너이므로 시작하기 전까지는 비용이 들지 않고, 게스트에 추가되는 것도 없습니다.
+그냥 kind 와 다른 점은 노드의 containerd 가 orbit 의 CA 래퍼를 거쳐 파드를 시작한다는
+것이어서, 파드도 컨테이너처럼 Mac 의 추가 루트를 신뢰합니다(레지스트리 pull, `curl`,
+Node.js). `orbit k8s up <name> [kind flags]` 로 클러스터를 하나 더 만들거나
+`--image kindest/node:v1.33.0` 같은 플래그를 넘길 수 있고, `orbit k8s status` 는
+클러스터 목록을 보여 줍니다. kind 는 kubeconfig 에 `kind-<name>` 컨텍스트를 추가하고
+현재 컨텍스트로 만듭니다.
+
+- 유휴 클러스터는 클러스터가 없는 VM 보다 Mac 에서 1.0–1.7 GB 를 더 차지했습니다
+  ([벤치마크](benchmarks.md#kubernetes)).
+- 서비스에는 `kubectl port-forward` 로 접근합니다. API 서버는 Mac 의 `127.0.0.1` 에
+  있습니다. 로컬에서 빌드한 이미지는 `kind load docker-image <image> --name orbit` 으로
+  넣으세요.
+- 클러스터는 `orbit up`(VM 재시작) 뒤에도 남고, `orbit uninstall` 이 지웁니다.
+
 ## 건강 점검(선택)
 
 `make install` 뒤에 `scripts/install-healthcheck.sh` 로 설치된
@@ -343,8 +369,10 @@ bind mount, inotify, 게스트 시계를 확인하고, VMM 의 메모리·스레
 - **Docker Desktop 이나 OrbStack 에서 옮겨 올 때:** 이미지, 컨테이너, 볼륨은 옮겨지지
   않습니다. 이미지를 다시 받거나 `docker save` / `docker load` 로 옮기고, 볼륨 내용은
   둘을 모두 마운트한 컨테이너로 복사하세요.
-- **빠진 것:** GUI 와 Kubernetes 가 없고, 서명된 바이너리 릴리스도 없습니다. 직접
-  빌드해야 합니다.
+- **Kubernetes:** kind(`orbit k8s`)로만 쓸 수 있고 기본은 단일 노드입니다.
+  `LoadBalancer` 서비스와 직접 쓴 kind 설정의 `extraPortMappings` 는 대신 설정해 주지
+  않습니다.
+- **빠진 것:** GUI 가 없고, 서명된 바이너리 릴리스도 없습니다. 직접 빌드해야 합니다.
 
 ## 동작 방식
 

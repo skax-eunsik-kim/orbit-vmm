@@ -92,7 +92,7 @@ compact करता है (यानी उसे defragment करता ह�
    ~257 MiB पर रुका रहता है, तो इस version पर free हुई guest memory वापस नहीं लौटती: VM Mac पर
    सिर्फ़ बढ़ता ही है।
 2. **Developer workflow।** VM चालू होने पर: `make devflow` को
-   0 fail (26 checks) report करना चाहिए।
+   0 fail (28 checks) report करना चाहिए।
 3. **Activity Monitor।** इसका Memory column VMM का `phys_footprint` है।
    जब Mac पर memory कम होती है, तो macOS guest RAM के एक हिस्से को compress करता है और
    वह संख्या guest के इस्तेमाल से ज़्यादा हो जाती है। Testing में, कुछ भी compressed न होने पर
@@ -198,8 +198,9 @@ home directory, उसके ऊपर की कोई भी चीज़, hid
   TLS-inspection CA) और उन्हें आपके guest में build करता है। ऐसे roots के बिना वाले Mac पर
   कुछ नहीं जोड़ा जाता, और containers अपनी images के अपने bundles देखते हैं।
   Repository और releases में कोई certificate नहीं होता।
-- Containers और build steps उन roots को image के CA bundle में जुड़ा हुआ देखते हैं,
-  एक mount के ज़रिए। किसी build step को bundle की directory की एक copy मिलती है,
+- Containers, build steps और Kubernetes pods (`orbit k8s`) उन roots को image के
+  CA bundle में जुड़ा हुआ देखते हैं, एक mount के ज़रिए। इसमें RHEL, Fedora और
+  Amazon Linux images भी शामिल हैं, जिनके bundle paths symlinks होते हैं। किसी build step को bundle की directory की एक copy मिलती है,
   इसलिए `update-ca-certificates` और `apt-get upgrade` काम करते हैं। इनमें से कोई भी
   Mac के roots को image में नहीं लिखता।
 - `ORBIT_HOST_CA=0 make guest && orbit up` उनके बिना एक guest build करता है।
@@ -329,6 +330,32 @@ Watchdog के बिना, `orbit up` वही supervisor background मे�
 इसलिए hangs अब भी detect होते हैं और crashes अब भी record होते हैं, लेकिन कुछ भी
 restart नहीं होता।
 
+## Kubernetes
+
+```bash
+brew install kind kubectl
+orbit k8s up                  # a single-node cluster named orbit (about 45 s the first time)
+kubectl --context kind-orbit get nodes
+orbit k8s down                # delete it; its memory goes back to the Mac within ~90 s
+```
+
+`orbit k8s` [kind](https://kind.sigs.k8s.io/) चलाता है: cluster VM में एक
+container है, इसलिए जब तक आप उसे start नहीं करते तब तक उसकी कोई कीमत नहीं, और guest में
+कुछ नहीं जोड़ा जाता। Plain kind के ऊपर यह इतना जोड़ता है कि node का
+containerd pods को orbit के CA wrapper के ज़रिए start करता है, इसलिए pods भी
+containers की तरह Mac के अतिरिक्त roots पर भरोसा करते हैं (registry pulls, `curl`, Node.js)।
+`orbit k8s up <name> [kind flags]` एक और cluster बनाता है या
+`--image kindest/node:v1.33.0` जैसे flags pass करता है; `orbit k8s status` clusters की list दिखाता है।
+kind आपकी kubeconfig में `kind-<name>` context जोड़ता है और उसे current बना देता है।
+
+- एक idle cluster ने Mac पर उसके बिना वाले VM से 1.0–1.7 GB ज़्यादा लिया
+  ([benchmarks](benchmarks.md#kubernetes))।
+- Services तक `kubectl port-forward` से पहुँचें; API server Mac के
+  `127.0.0.1` पर है। Locally build की गई images के लिए
+  `kind load docker-image <image> --name orbit` इस्तेमाल करें।
+- Cluster `orbit up` (VM restart) के बाद भी बना रहता है और `orbit uninstall` से
+  delete होता है।
+
 ## Health check (वैकल्पिक)
 
 `make install` के बाद, `scripts/install-healthcheck.sh` एक launchd
@@ -371,7 +398,10 @@ Check हर घंटे चलता है। लगातार तीन he
 - **Docker Desktop या OrbStack से आ रहे हैं:** images, containers और volumes
   migrate नहीं होते। Images फिर से pull करें, या उन्हें `docker save` /
   `docker load` से move करें; volume contents को ऐसे container से copy करें जो दोनों को mount करे।
-- **कमी वाले हिस्से:** कोई GUI या Kubernetes नहीं, और कोई signed binary release नहीं: आपको
+- **Kubernetes:** सिर्फ़ kind (`orbit k8s`) के ज़रिए, default रूप से single node।
+  `LoadBalancer` services और आपकी अपनी kind config के `extraPortMappings`
+  आपके लिए set up नहीं किए जाते।
+- **कमी वाले हिस्से:** कोई GUI नहीं, और कोई signed binary release नहीं: आपको
   इसे खुद build करना होगा।
 
 ## यह कैसे काम करता है

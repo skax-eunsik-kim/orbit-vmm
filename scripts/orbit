@@ -9,12 +9,15 @@
 #   orbit update [--to TAG] [--now]
 #   orbit rollback [--now]
 #   orbit uninstall [--yes]      remove orbit, its VMs and their data disks
+#   orbit k8s up|down|status [NAME] [kind create flags]
+#                                a Kubernetes cluster in the VM (kind)
 #
-# ORBIT_INSTANCE selects the instance for up, down, status, update and rollback.
+# ORBIT_INSTANCE selects the instance for up, down, status, update, rollback
+# and k8s.
 set -euo pipefail
 BIN="$(cd "$(dirname "$0")" && pwd)"
 D="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}"
-usage() { sed -n '6,11s/^# \{0,3\}//p' "$0" >&2; exit 2; }
+usage() { sed -n '6,13s/^# \{0,3\}//p' "$0" >&2; exit 2; }
 
 status() {
   echo "installed: $(sed -n 's/^version=//p' "$BIN/VERSION" 2>/dev/null || echo unknown) ($BIN)"
@@ -46,6 +49,12 @@ uninstall() {
     while IFS= read -r scratch; do
       [ -n "$scratch" ] && rm -rf "${scratch:?}/.orbit-health"
     done < <(cat "$inst/shares" 2>/dev/null)
+    # orbit k8s clusters: deleting them also drops their kubectl contexts.
+    if command -v kind >/dev/null && [ -S "$inst/docker.sock" ]; then
+      DOCKER_HOST="unix://$inst/docker.sock" kind get clusters 2>/dev/null | while IFS= read -r c; do
+        DOCKER_HOST="unix://$inst/docker.sock" kind delete cluster --name "$c" >/dev/null 2>&1 && echo "removed Kubernetes cluster $c"
+      done
+    fi
     ORBIT_INSTANCE=$name "$BIN/vmm-up.sh" --stop >/dev/null 2>&1 || true
   done
   local plist label
@@ -63,6 +72,44 @@ uninstall() {
   fi
 }
 
+# A kind cluster (Kubernetes in a Docker container) whose node runs its pods
+# through orbit-runc too, so pods trust the Mac's extra roots like containers do.
+k8s() {
+  local cmd=${1:-status} name=${2:-orbit}
+  [ $# -gt 2 ] && shift 2 || set --
+  command -v kind >/dev/null || { echo "orbit k8s needs kind and kubectl: brew install kind kubectl" >&2; exit 1; }
+  export DOCKER_HOST="unix://$D/docker.sock"
+  case $cmd in
+    up)
+      if kind get clusters 2>/dev/null | grep -qx "$name"; then echo "cluster $name exists; kubectl --context kind-$name"; return; fi
+      local cfg
+      cfg=$(mktemp)
+      # Guest paths: the node container is created by the guest's dockerd.
+      cat > "$cfg" <<'YAML'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraMounts:
+  - {hostPath: /etc/orbit/orbit-runc, containerPath: /etc/orbit/orbit-runc, readOnly: true}
+  - {hostPath: /etc/orbit/host-ca.pem, containerPath: /etc/orbit/host-ca.pem, readOnly: true}
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+    BinaryName = "/etc/orbit/orbit-runc"
+YAML
+      kind create cluster --name "$name" --config "$cfg" --wait 3m "$@" || { rm -f "$cfg"; exit 1; }
+      rm -f "$cfg"
+      # kind waits for the node; DNS and storage come up a little later.
+      command -v kubectl >/dev/null && kubectl --context "kind-$name" -n kube-system wait --for=condition=Ready pod --all --timeout=3m >/dev/null
+      echo "kubectl --context kind-$name (orbit k8s down $name removes it)"
+      ;;
+    down) kind delete cluster --name "$name" ;;
+    status) kind get clusters ;;
+    *) usage ;;
+  esac
+}
+
 case "${1:-}" in
   up) shift; exec "$BIN/vmm-up.sh" "$@" ;;
   down) exec "$BIN/vmm-up.sh" --stop ;;
@@ -70,5 +117,6 @@ case "${1:-}" in
   update) shift; exec "$BIN/update.sh" "$@" ;;
   rollback) shift; exec "$BIN/update.sh" --rollback "$@" ;;
   uninstall) shift; uninstall "$@" ;;
+  k8s) shift; k8s "$@" ;;
   *) usage ;;
 esac

@@ -88,6 +88,11 @@ check "build: RUN regenerates CA bundle" bash -c "printf 'FROM python:3.12-slim\
 check "build: host CA kept out of image" bash -c "c=\$(${D[*]} create orbittest/ca) && ${D[*]} cp \$c:/etc/ssl/certs/ca-certificates.crt - | tar -xO > '$OUT.ca' && ${D[*]} rm \$c >/dev/null &&
   python3 -I '$HERE/../../scripts/export-host-ca.py' 2>/dev/null | python3 -I -c \"import re,sys; c=lambda t: set(re.findall(r'-----BEGIN CERTIFICATE-----[^-]+', t)); h=c(sys.stdin.read()); sys.exit(1 if h & c(open('$OUT.ca').read()) else 0)\""
 rm -f "$OUT.ca"
+# RHEL-family images reach their bundle through symlinks into ca-trust/.
+check "build: RHEL image RUN HTTPS + update-ca-trust" bash -c "printf 'FROM registry.access.redhat.com/ubi9/ubi-minimal\nRUN curl -sS -o /dev/null https://dl-cdn.alpinelinux.org/ && update-ca-trust\n' | ${D[*]} build -q --no-cache -t orbittest/ca-rhel -"
+check "build: host CA kept out of RHEL image" bash -c "c=\$(${D[*]} create orbittest/ca-rhel) && ${D[*]} cp \$c:/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem - | tar -xO > '$OUT.ca' && ${D[*]} rm \$c >/dev/null &&
+  python3 -I '$HERE/../../scripts/export-host-ca.py' 2>/dev/null | python3 -I -c \"import re,sys; c=lambda t: set(re.findall(r'-----BEGIN CERTIFICATE-----[^-]+', t)); h=c(sys.stdin.read()); sys.exit(1 if h & c(open('$OUT.ca').read()) else 0)\""
+rm -f "$OUT.ca"
 # Bundles in nested directories (/etc/ssl/certs and /etc/ssl) both get the
 # Mac's roots, and a mount the build puts on the CA directory is left alone.
 check "build: nested CA bundle dirs" bash -c "printf 'FROM python:3.12-slim\nRUN touch /etc/ssl/ca-bundle.pem\nRUN tail -c \$(stat -c %%s /etc/ssl/ca-bundle.pem) /etc/ssl/certs/ca-certificates.crt | cmp - /etc/ssl/ca-bundle.pem\n' | ${D[*]} build -q --no-cache -"

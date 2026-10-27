@@ -65,6 +65,11 @@ Linux はファイルデータをページキャッシュとして保持し続�
 - macOS がメモリプレッシャーを報告している間は、代わりにページキャッシュを 256 MiB（warn）
   または 64 MiB（critical）未満に保ちます（`orbit.memd_warn_mb`、
   `orbit.memd_crit_mb`）。
+- ワーキングセットより下まで絞ることはありません。上限によって回収したページがすぐに
+  読み直されると（`workingset_refault_file`）、上限をキャッシュのサイズで止め、refault の
+  ない 1 分ごとに 4 分の 1 ずつ緩めます。以前は、macOS の「warn」プレッシャー下で
+  Kubernetes のコントロールプレーンが 1 分あたり約 2.7 GB を失っては読み直していましたが、
+  現在は約 0.1–0.2 GB です。
 
 `pressure.rs` は macOS のメモリプレッシャーを監視し（libdispatch のメモリプレッシャー
 ソースに加え、30 s ごとに `kern.memorystatus_vm_pressure_level` を読み直します）、
@@ -184,7 +189,12 @@ control vsock で `pressure normal|warn|critical` を送ります。変化があ
   （`scripts/export-host-ca.py`。通常は社内の TLS インスペクション用 CA で、ほとんどの Mac では
   存在せず、`ORBIT_HOST_CA=0` の場合もありません）、`/etc/orbit/host-ca.pem` に格納します。
   - コンテナには、イメージの CA バンドルにそれらを追記したコピーが、バンドルの上に読み取り
-    専用で bind mount されます。
+    専用で bind mount されます。バンドルのパスがシンボリックリンクの場合（RHEL、Fedora、
+    Amazon Linux は `ca-trust/` へリンクしています）、コンテナから見えるとおりに、その
+    rootfs の中だけで解決し、コピーはリンク先のファイルの上に重ねます。
+  - `orbit k8s` が作成した kind ノードでは、ノードの containerd が同じラッパーを通じて Pod を
+    実行する（`host-ca.pem` とともにゲストからマウントし、runc の `BinaryName` に設定）ため、
+    Pod も同じ扱いを受けます。
   - ビルドの `RUN` ステップには、代わりにバンドルのディレクトリの読み書き可能なコピーが
     渡されるため、rename によってバンドルを再生成するツールも動作します。runc は子プロセス
     として実行されます。runc が戻ったとき（BuildKit は `--keep` を渡すため、rootfs はまだ
@@ -222,6 +232,8 @@ control vsock で `pressure normal|warn|critical` を送ります。変化があ
   `rollback` は `update.sh` を実行し、`status` は状態を報告し、`uninstall` はエージェント、
   ヘルスチェックの作業ディレクトリ、`~/.orbit` を削除します。Makefile の実行ターゲットは
   これを呼び出すため、チェックアウト内のものは何も実行されません。
+  `orbit k8s up|down|status` は、ノードを上記のように構成した kind クラスターを作成・削除
+  します。`uninstall` もクラスターを削除し、その kubectl コンテキストも消えます。
 - `update.sh`（`orbit update`、`orbit rollback`）は、`~/.orbit/bin/VERSION` に記録された
   リポジトリの専用クローン（`~/.orbit/src`）でリリースタグをビルドし、新しいゲストをステージングディレクトリでビルドします。ロールバック
   用に以前のバイナリとゲストを保持し、コンテナが 1 つも動いていないときにだけ VM を再起動します。
