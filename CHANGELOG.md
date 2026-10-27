@@ -5,6 +5,27 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `orbit k8s up|down|status`: a Kubernetes cluster in the VM through
+  [kind](https://kind.sigs.k8s.io/), whose node runs pods through orbit's CA
+  wrapper, so pods trust the Mac's extra roots like containers do. It costs
+  nothing until started; an idle cluster takes about 1 GB more on the Mac,
+  returned within about 90 s of `orbit k8s down`. `orbit uninstall` deletes
+  clusters too. `bench/k8s/k8s.sh` checks it (#31).
+
+### Fixed
+
+- RHEL, Fedora and Amazon Linux images trust the Mac's extra roots. Their CA
+  bundle paths are symlinks, which the wrapper skipped, so these images never
+  got them; the symlinks are now resolved inside the container's rootfs.
+  devflow checks a UBI build (#32).
+- Under macOS memory pressure, the guest no longer throws away page cache it
+  needs right away. A workload whose file working set exceeded the 256 MiB
+  cap (a Kubernetes control plane: about 2.7 GB a minute) re-read it from disk
+  over and over; memd now holds the cap at the working set when its reclaim
+  causes refaults (about 0.1-0.2 GB a minute left) (#33).
+
 ## [0.2.2] - 2026-10-27
 
 ### Security

@@ -11,7 +11,7 @@ write to a checkout in a shared directory.
 | [`extract-image.py`](extract-image.py) | `fetch-guest.sh` | Extracts the uncompressed arm64 kernel `Image` from Alpine's `vmlinuz`. |
 | [`export-host-ca.py`](export-host-ca.py) | `fetch-guest.sh` | Prints the roots this Mac trusts for TLS beyond Apple's set (usually a company TLS-inspection CA). |
 | [`install.sh`](install.sh) | `make install` | Copies the VMM and these scripts to `~/.orbit/bin`, writes `VERSION` (version and repository), installs the watchdog (`ORBIT_WATCHDOG=0` skips it). Warns when the checkout is in a shared directory. |
-| [`orbit`](orbit) | you (`make up` etc. call it) | The installed command: `up`, `down`, `status`, `update`, `rollback`, `uninstall`. |
+| [`orbit`](orbit) | you (`make up` etc. call it) | The installed command: `up`, `down`, `status`, `update`, `rollback`, `uninstall`, and `k8s` (kind clusters whose pods trust the Mac's roots). |
 | [`install-watchdog.sh`](install-watchdog.sh) | `install.sh` | The launchd agent `com.orbit.vmm`. Re-running leaves a running VM alone; `--reload` applies a changed agent, `--uninstall` removes it. |
 | [`install-healthcheck.sh`](install-healthcheck.sh) | you | The optional hourly health check agent. |
 | [`vmm-up.sh`](vmm-up.sh) | `orbit up` / `orbit down` | (Re)starts the VM and waits for Docker; `--stop` shuts it down on purpose. |

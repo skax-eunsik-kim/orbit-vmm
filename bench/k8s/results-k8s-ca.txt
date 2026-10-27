@@ -1,0 +1,14 @@
+PASS  orbit k8s up (node Ready)                    40.2s
+PASS  kubectl from the Mac                         0.2s
+PASS  system pods running                          0.2s
+PASS  deployment pulls from a registry             7.7s
+PASS  service DNS from a pod                       6.9s
+PASS  pod HTTPS, Alpine (Mac roots)                4.7s
+PASS  pod HTTPS, UBI (symlinked bundle)            88.4s
+PASS  pod HTTPS, Node.js fetch                     13.3s
+PASS  persistent volume (local-path)               6.5s
+PASS  locally built image (kind load)              5.8s
+PASS  port-forward to the Mac                      3.1s
+PASS  20 pods Ready                                4.8s
+PASS  orbit k8s down                               1.1s
+INFO  VM memory on the Mac (MiB)                   before=2300 cluster-idle=4036 20-pods=4598 after-delete+60s=2047; scale-to-20=5.0s

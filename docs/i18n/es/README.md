@@ -101,7 +101,7 @@ confiar en él:
    ~257 MiB, la memoria liberada del invitado no se devuelve en esta versión:
    la VM solo crece en el Mac.
 2. **Flujo de trabajo de desarrollo.** Con la VM levantada: `make devflow`
-   debe informar 0 fail (26 comprobaciones).
+   debe informar 0 fail (28 comprobaciones).
 3. **Activity Monitor.** Su columna Memory es el `phys_footprint` del VMM.
    Cuando al Mac le falta memoria, macOS comprime parte de la RAM del invitado
    y ese número crece por encima de lo que usa el invitado. En las pruebas la
@@ -215,8 +215,10 @@ ni eliminar los propios directorios compartidos.
   Mac sin raíces de ese tipo no se añade nada, y los contenedores ven los
   bundles propios de sus imágenes. El repositorio y las releases no contienen
   certificados.
-- Los contenedores y los pasos de build ven esas raíces añadidas al bundle de
-  CA de la imagen, mediante un montaje. Un paso de build recibe una copia del
+- Los contenedores, los pasos de build y los pods de Kubernetes (`orbit k8s`)
+  ven esas raíces añadidas al bundle de CA de la imagen, mediante un montaje.
+  Eso incluye las imágenes de RHEL, Fedora y Amazon Linux, cuyas rutas de
+  bundle son enlaces simbólicos. Un paso de build recibe una copia del
   directorio del bundle, así que `update-ca-certificates` y `apt-get upgrade`
   funcionan. Ninguno de los dos escribe las raíces del Mac en la imagen.
 - `ORBIT_HOST_CA=0 make guest && orbit up` genera un invitado sin ellas.
@@ -353,6 +355,33 @@ Sin el watchdog, `orbit up` ejecuta el mismo supervisor en segundo plano, así
 que los cuelgues se siguen detectando y los fallos se siguen registrando, pero
 no se reinicia nada.
 
+## Kubernetes
+
+```bash
+brew install kind kubectl
+orbit k8s up                  # a single-node cluster named orbit (about 45 s the first time)
+kubectl --context kind-orbit get nodes
+orbit k8s down                # delete it; its memory goes back to the Mac within ~90 s
+```
+
+`orbit k8s` ejecuta [kind](https://kind.sigs.k8s.io/): el clúster es un
+contenedor dentro de la VM, así que no cuesta nada hasta que lo inicias, y no
+se añade nada al invitado. Lo que aporta frente a kind a secas es que el
+containerd del nodo inicia los pods a través del wrapper de CA de orbit, de
+modo que los pods confían en las raíces adicionales del Mac (descargas del
+registro, `curl`, Node.js) igual que los contenedores.
+`orbit k8s up <name> [kind flags]` crea otro clúster o pasa flags como
+`--image kindest/node:v1.33.0`; `orbit k8s status` lista los clústeres. kind
+añade el contexto `kind-<name>` a tu kubeconfig y lo deja como actual.
+
+- Un clúster inactivo ocupó entre 1.0 y 1.7 GB más en el Mac que la VM sin él
+  ([benchmarks](benchmarks.md#kubernetes)).
+- Accede a los servicios con `kubectl port-forward`; el servidor de la API
+  está en `127.0.0.1` del Mac. Usa `kind load docker-image <image> --name orbit`
+  para las imágenes que hayas compilado localmente.
+- El clúster sobrevive a `orbit up` (el reinicio de la VM) y se elimina con
+  `orbit uninstall`.
+
 ## Comprobación de estado (opcional)
 
 Tras `make install`, `scripts/install-healthcheck.sh` instala un agente de
@@ -404,8 +433,11 @@ vuelve a poner cada hora. Para eliminarla, ejecuta `--uninstall`.
   los volúmenes no se migran. Vuelve a descargar las imágenes, o muévelas con
   `docker save` / `docker load`; copia el contenido de los volúmenes con un
   contenedor que monte ambos.
-- **Piezas que faltan:** no hay GUI ni Kubernetes, ni una release de binarios
-  firmados: lo compilas tú mismo.
+- **Kubernetes:** solo a través de kind (`orbit k8s`), con un solo nodo por
+  defecto. Los servicios `LoadBalancer` y los `extraPortMappings` de tu propia
+  configuración de kind no se configuran por ti.
+- **Piezas que faltan:** no hay GUI ni una release de binarios firmados: lo
+  compilas tú mismo.
 
 ## Cómo funciona
 

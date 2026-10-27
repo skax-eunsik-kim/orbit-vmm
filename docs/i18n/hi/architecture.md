@@ -67,6 +67,11 @@ Linux file data को page cache के रूप में पकड़े र
 - जब तक macOS memory pressure report करता है, यह इसके बजाय page cache को 256 MiB
   (warn) या 64 MiB (critical) से नीचे रखता है (`orbit.memd_warn_mb`,
   `orbit.memd_crit_mb`)।
+- यह कभी working set से नीचे नहीं दबाता। जब cap के reclaim किए pages तुरंत वापस
+  पढ़े जाते हैं (`workingset_refault_file`), तो cap cache के size पर रुक जाता है और
+  बिना refaults वाले हर minute में एक चौथाई ढीला होता है। इससे पहले, macOS "warn"
+  pressure के तहत एक Kubernetes control plane हर minute लगभग 2.7 GB खोकर दोबारा पढ़ता था;
+  अब लगभग 0.1–0.2 GB।
 
 `pressure.rs` macOS memory pressure पर नज़र रखता है (एक libdispatch memory-pressure
 source, साथ ही हर 30 s पर दोबारा पढ़ा जाने वाला `kern.memorystatus_vm_pressure_level`) और
@@ -186,7 +191,13 @@ Guest के हिस्से:
   (`scripts/export-host-ca.py`, आमतौर पर किसी company का TLS-inspection CA; ज़्यादातर Macs पर कोई नहीं,
   और `ORBIT_HOST_CA=0` के साथ कोई नहीं) `/etc/orbit/host-ca.pem` में export करता है।
   - किसी container को image के CA bundle की एक copy मिलती है जिसमें ये roots जोड़े गए होते हैं,
-    और वह bundle के ऊपर read-only bind-mount की जाती है।
+    और वह bundle के ऊपर read-only bind-mount की जाती है। जो bundle path symlink हो
+    (RHEL, Fedora, Amazon Linux अपने bundle को `ca-trust/` में link करते हैं), उसे वैसे ही
+    resolve किया जाता है जैसे container उसे देखेगा, सिर्फ़ उसके rootfs के अंदर, और copy उस
+    file के ऊपर जाती है जिसकी ओर वह इशारा करता है।
+  - `orbit k8s` से बने kind node में, node का containerd pods को उसी wrapper के ज़रिए चलाता है
+    (guest से `host-ca.pem` के साथ mount किया गया, और runc `BinaryName` के रूप में set),
+    इसलिए pods को भी वही treatment मिलता है।
   - किसी build के `RUN` step को इसके बजाय bundle की directory की एक read-write copy
     मिलती है, ताकि जो tools bundle को rename के ज़रिए regenerate करते हैं वे काम करें। runc एक
     child के रूप में चलता है; जब वह लौटता है (BuildKit `--keep` पास करता है, इसलिए rootfs अब भी
@@ -225,6 +236,8 @@ Guest के हिस्से:
   और `rollback` `update.sh` चलाते हैं, `status` report करता है, और `uninstall` agents,
   health check की scratch directories और `~/.orbit` को हटाता है। Makefile के run targets
   इसे call करते हैं, इसलिए checkout में से कुछ नहीं चलता।
+  `orbit k8s up|down|status` ऊपर बताए अनुसार configured node वाले kind clusters बनाता और
+  delete करता है; `uninstall` भी उन्हें delete करता है, जिससे उनके kubectl contexts भी हट जाते हैं।
 - `update.sh` (`orbit update`, `orbit rollback`) `~/.orbit/bin/VERSION` में record की गई
   repository के अपने खुद के clone (`~/.orbit/src`) में एक release tag
   और एक staging directory में नया guest build करता है, rollback के लिए पिछली binaries और guest

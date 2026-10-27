@@ -90,7 +90,7 @@ macOS へ返却できるか、またアクティビティモニタがそれを�
    約 257 MiB のままであれば、このバージョンでは解放されたゲストメモリが返却されません。つまり、VM は
    Mac 上で増える一方になります。
 2. **開発者ワークフロー。** VM を起動した状態で、`make devflow` が
-   0 fail（26 チェック）と報告する必要があります。
+   0 fail（28 チェック）と報告する必要があります。
 3. **アクティビティモニタ。** そのメモリ列は VMM の `phys_footprint` です。
    Mac のメモリが不足すると、macOS はゲスト RAM の一部を圧縮し、
    その数値はゲストの使用量を超えて増えます。テストでは、何も圧縮されていないときの差はほぼ
@@ -195,8 +195,9 @@ ORBIT_SHARE_ALLOW="$HOME/src:$HOME/clients" orbit up
   TLS 検査用 CA）を読み取り、ゲストに組み込みます。そのようなルート証明書がない Mac では
   何も追加されず、コンテナにはイメージ自身のバンドルが見えます。
   リポジトリとリリースには証明書は含まれていません。
-- コンテナとビルドステップには、マウントを通じて、それらのルート証明書がイメージの CA
-  バンドルに追記された状態で見えます。ビルドステップにはバンドルのディレクトリのコピーが渡されるため、
+- コンテナ、ビルドステップ、Kubernetes の Pod（`orbit k8s`）には、マウントを通じて、
+  それらのルート証明書がイメージの CA バンドルに追記された状態で見えます。バンドルのパスが
+  シンボリックリンクになっている RHEL、Fedora、Amazon Linux のイメージも同様です。ビルドステップにはバンドルのディレクトリのコピーが渡されるため、
   `update-ca-certificates` や `apt-get upgrade` も動作します。どちらも
   Mac のルート証明書をイメージに書き込むことはありません。
 - `ORBIT_HOST_CA=0 make guest && orbit up` で、それらを含まないゲストをビルドできます。
@@ -323,6 +324,31 @@ ORBIT_WATCHDOG=0 make install          # install without it
 そのため、ハングの検出とクラッシュの記録は引き続き行われますが、何も
 再起動されません。
 
+## Kubernetes
+
+```bash
+brew install kind kubectl
+orbit k8s up                  # a single-node cluster named orbit (about 45 s the first time)
+kubectl --context kind-orbit get nodes
+orbit k8s down                # delete it; its memory goes back to the Mac within ~90 s
+```
+
+`orbit k8s` は [kind](https://kind.sigs.k8s.io/) を実行します。クラスターは VM 内の
+コンテナなので、起動するまでコストはかからず、ゲストにも何も追加されません。素の kind と
+違うのは、ノードの containerd が orbit の CA ラッパーを通じて Pod を起動する点です。
+そのため Pod もコンテナと同じように Mac の追加のルート証明書を信頼します（レジストリからの
+pull、`curl`、Node.js）。`orbit k8s up <name> [kind flags]` で別のクラスターを作ったり、
+`--image kindest/node:v1.33.0` のようなフラグを渡したりできます。`orbit k8s status` は
+クラスターを一覧表示します。kind は kubeconfig に `kind-<name>` コンテキストを追加し、
+それを現在のコンテキストにします。
+
+- アイドル状態のクラスターは、クラスターなしの VM より Mac 上で 1.0–1.7 GB 多く
+  使用しました（[ベンチマーク](benchmarks.md#kubernetes)）。
+- サービスには `kubectl port-forward` でアクセスします。API サーバーは Mac の
+  `127.0.0.1` にあります。ローカルでビルドしたイメージには
+  `kind load docker-image <image> --name orbit` を使ってください。
+- クラスターは `orbit up`（VM の再起動）後も残り、`orbit uninstall` で削除されます。
+
 ## ヘルスチェック（任意）
 
 `make install` の後、`scripts/install-healthcheck.sh` を実行すると、インストール済みの
@@ -365,7 +391,10 @@ fd 数を `~/.orbit/vmm/health.jsonl` に記録します。
 - **Docker Desktop や OrbStack からの移行:** イメージ、コンテナ、ボリュームは移行されません。
   イメージは pull し直すか `docker save` / `docker load` で移し、ボリュームの内容は
   両方をマウントしたコンテナでコピーしてください。
-- **未対応のもの:** GUI と Kubernetes はなく、署名済みのバイナリリリースもありません。
+- **Kubernetes:** kind（`orbit k8s`）経由のみで、デフォルトはシングルノードです。
+  `LoadBalancer` サービスや、独自の kind 設定の `extraPortMappings` は自動では
+  設定されません。
+- **未対応のもの:** GUI はなく、署名済みのバイナリリリースもありません。
   自分でビルドしてください。
 
 ## 仕組み

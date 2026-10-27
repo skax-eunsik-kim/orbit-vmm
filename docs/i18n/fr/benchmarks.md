@@ -33,7 +33,7 @@ anonyme), puis 30 s et 90 s après la fin du conteneur. Le tableau montre le rep
 
 ## Workflow de développement
 
-`bench/devflow/devflow.sh` exécute 26 vérifications :
+`bench/devflow/devflow.sh` exécute 28 vérifications :
 
 - compose up avec healthchecks, et ports publiés depuis le Mac
 - DNS des services et `host.docker.internal`
@@ -42,9 +42,42 @@ anonyme), puis 30 s et 90 s après la fin du conteneur. Le tableau montre le rep
 - HTTPS derrière un proxy TLS et une image amd64
 - un build BuildKit (`# syntax`, ghcr, cache mounts apt/uv) et une migration
   alembic
+- le wrapper de CA de l'invité face à des étapes de build hostiles (répertoires
+  de CA liés par lien symbolique ou échangés, disque plein), et un build RHEL
+  (UBI) dont le bundle est un lien symbolique
 - logs, exec, stats et décalage d'horloge
 
-Résultat actuel : 26/26 réussies.
+Résultat actuel : 28/28 réussies.
+
+## Kubernetes
+
+`bench/k8s/k8s.sh` vérifie `orbit k8s` (kind v0.33, Kubernetes v1.37, un seul
+nœud) et enregistre le `phys_footprint` du VMM. Trois exécutions sur une
+instance isolée (8 GiB, 6 vCPU) sous macOS 26.4, M-series, le 2026-10-27 :
+
+| | Exécution 1 | Exécution 2 | Exécution 3 |
+|---|---|---|---|
+| `orbit k8s up` (nœud Ready) | 43 s | 45 s | 40 s |
+| VM avant le cluster | 2019 MiB | 2797 MiB | 2300 MiB |
+| Cluster au repos (60 s) | 3267 MiB | 3757 MiB | 4036 MiB |
+| 20 pods nginx | 4417 MiB | 5247 MiB | 4598 MiB |
+| 60 s après `orbit k8s down` | 2685 MiB | 2302 MiB | 2047 MiB |
+| Passage de 1 → 20 pods Ready | 14 s | 5 s | 5 s |
+
+« Avant » inclut le page cache laissé par les exécutions précédentes, d'où sa
+variation. Une trace séparée, relevée toutes les 30 s, a montré la VM revenue
+sous sa taille d'avant le cluster 90 s après la suppression du cluster
+(1686 MiB avant, 1468 MiB après).
+
+Sous pression mémoire macOS « warn » (forcée avec `ORBIT_PRESSURE=warn`), avec
+le cluster au repos, une minute chacun :
+
+| memd | Page cache relu (refault) | Lectures + écritures disque | Page cache conservé |
+|---|---|---|---|
+| avant #33 | 2.7 GB | 3.4 GB | 460–510 MiB |
+| après | 0.09–0.2 GB | 0.14–0.27 GB | environ 600 MiB |
+
+Résultat actuel : 13/13 réussies.
 
 ## Stabilité
 

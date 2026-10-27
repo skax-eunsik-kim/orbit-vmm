@@ -32,7 +32,7 @@
 
 ## 开发者工作流
 
-`bench/devflow/devflow.sh` 运行 26 项检查：
+`bench/devflow/devflow.sh` 运行 28 项检查：
 
 - 带健康检查的 compose up，以及从 Mac 访问已发布的端口
 - 服务 DNS 和 `host.docker.internal`
@@ -41,9 +41,40 @@
 - TLS 代理后的 HTTPS 和 amd64 镜像
 - 一次 BuildKit 构建（`# syntax`、ghcr、apt/uv 缓存挂载）和一次 alembic
   迁移
+- guest 的 CA 包装器面对恶意构建步骤（符号链接或被替换的 CA 目录、磁盘写满）
+  的表现，以及一次证书包为符号链接的 RHEL（UBI）构建
 - 日志、exec、stats 和时钟偏差
 
-当前结果：26/26 通过。
+当前结果：28/28 通过。
+
+## Kubernetes
+
+`bench/k8s/k8s.sh` 检查 `orbit k8s`（kind v0.33、Kubernetes v1.37、单节点），
+并记录 VMM 的 `phys_footprint`。在 macOS 26.4、M 系列上的一个隔离实例
+（8 GiB、6 个 vCPU）上运行三次，2026-10-27：
+
+| | 第 1 次 | 第 2 次 | 第 3 次 |
+|---|---|---|---|
+| `orbit k8s up`（节点 Ready） | 43 s | 45 s | 40 s |
+| 创建集群前的虚拟机 | 2019 MiB | 2797 MiB | 2300 MiB |
+| 集群空闲（60 s） | 3267 MiB | 3757 MiB | 4036 MiB |
+| 20 个 nginx pod | 4417 MiB | 5247 MiB | 4598 MiB |
+| `orbit k8s down` 后 60 s | 2685 MiB | 2302 MiB | 2047 MiB |
+| 从 1 扩到 20 个 pod Ready | 14 s | 5 s | 5 s |
+
+“创建集群前”包含之前运行留下的页缓存，因此会有波动。另一次每 30 s 记录一次的
+跟踪显示，集群删除 90 s 后虚拟机已回落到创建集群前的大小以下（之前 1686 MiB，
+之后 1468 MiB）。
+
+在 macOS "warn" 内存压力下（用 `ORBIT_PRESSURE=warn` 固定），集群空闲，
+每项一分钟：
+
+| memd | 重新读回的页缓存 | 磁盘读 + 写 | 保留的页缓存 |
+|---|---|---|---|
+| #33 之前 | 2.7 GB | 3.4 GB | 460–510 MiB |
+| 之后 | 0.09–0.2 GB | 0.14–0.27 GB | 约 600 MiB |
+
+当前结果：13/13 通过。
 
 ## 稳定性
 

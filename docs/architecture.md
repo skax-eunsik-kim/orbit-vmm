@@ -65,6 +65,11 @@ Linux holds on to file data as page cache, which the balloon can't report.
 - While macOS reports memory pressure, it keeps the page cache under 256 MiB
   (warn) or 64 MiB (critical) instead (`orbit.memd_warn_mb`,
   `orbit.memd_crit_mb`).
+- It never squeezes below the working set. When pages the cap reclaimed are
+  read straight back (`workingset_refault_file`), the cap holds at the
+  cache's size and loosens by a quarter each minute without refaults.
+  Before this, a Kubernetes control plane under macOS "warn" pressure lost
+  and re-read about 2.7 GB a minute; now about 0.1–0.2 GB.
 
 `pressure.rs` watches macOS memory pressure (a libdispatch memory-pressure
 source, plus `kern.memorystatus_vm_pressure_level` re-read every 30 s) and
@@ -187,7 +192,13 @@ Guest pieces:
   (`scripts/export-host-ca.py`, usually a company TLS-inspection CA; none on
   most Macs, and none with `ORBIT_HOST_CA=0`) into `/etc/orbit/host-ca.pem`.
   - A container gets a copy of the image's CA bundle with them appended,
-    bind-mounted read-only over the bundle.
+    bind-mounted read-only over the bundle. A bundle path that is a symlink
+    (RHEL, Fedora, Amazon Linux link theirs into `ca-trust/`) is resolved
+    the way the container would see it, inside its rootfs only, and the copy
+    goes over the file it names.
+  - In a kind node made by `orbit k8s`, the node's containerd runs pods
+    through the same wrapper (mounted from the guest with `host-ca.pem`, and
+    set as the runc `BinaryName`), so pods get the same treatment.
   - A build `RUN` step gets a read-write copy of the bundle's directory
     instead, so tools that regenerate the bundle by rename work. runc runs as
     a child; when it returns (BuildKit passes `--keep`, so the rootfs is still
@@ -226,6 +237,9 @@ Guest pieces:
   and `rollback` run `update.sh`, `status` reports, and `uninstall` removes the
   agents, the health check's scratch directories and `~/.orbit`. The
   Makefile's run targets call it, so nothing in the checkout runs.
+  `orbit k8s up|down|status` creates and deletes kind clusters with the
+  node configured as above; `uninstall` deletes them too, which also drops
+  their kubectl contexts.
 - `update.sh` (`orbit update`, `orbit rollback`) builds a release tag in its own
   clone (`~/.orbit/src`) of the repository recorded in `~/.orbit/bin/VERSION`,
   and the new guest in a staging directory, keeps the

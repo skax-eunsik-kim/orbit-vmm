@@ -63,6 +63,10 @@ Linux 会把文件数据保留为页缓存（page cache），而 balloon 无法�
   （构建从不空闲；而且 Mac 本身也会缓存 `data.img`）。
 - 当 macOS 报告内存压力时，改为把页缓存控制在 256 MiB（warn）或 64 MiB
   （critical）以下（`orbit.memd_warn_mb`、`orbit.memd_crit_mb`）。
+- 它从不压缩到工作集以下。当上限回收的页被立即重新读回
+  （`workingset_refault_file`）时，上限会停在缓存当前的大小，并在每分钟没有
+  refault 时放宽四分之一。在此之前，处于 macOS "warn" 压力下的 Kubernetes
+  控制平面每分钟会丢弃并重新读取约 2.7 GB；现在约为 0.1–0.2 GB。
 
 `pressure.rs` 监视 macOS 内存压力（一个 libdispatch 内存压力源，外加每 30 s
 重新读取一次的 `kern.memorystatus_vm_pressure_level`），并通过控制 vsock 发送
@@ -172,7 +176,12 @@ Guest 组件：
   （`scripts/export-host-ca.py`，通常是公司的 TLS 检查 CA；大多数 Mac 上没有，
   设置 `ORBIT_HOST_CA=0` 时也没有）。
   - 容器会得到一份镜像 CA bundle 的副本，其中追加了这些根证书，并以只读方式
-    bind-mount 覆盖在原 bundle 上。
+    bind-mount 覆盖在原 bundle 上。如果 bundle 路径是符号链接（RHEL、Fedora、
+    Amazon Linux 会把它链接到 `ca-trust/` 中），则按容器所见的方式解析，且仅在
+    其 rootfs 内解析，副本覆盖在它所指向的文件上。
+  - 在 `orbit k8s` 创建的 kind 节点中，节点的 containerd 通过同一个包装器运行
+    pod（与 `host-ca.pem` 一起从 guest 挂载，并设为 runc 的 `BinaryName`），
+    因此 pod 也得到同样的处理。
   - 构建中的 `RUN` 步骤则会得到该 bundle 所在目录的一份可读写副本，这样通过
     重命名来重新生成 bundle 的工具也能正常工作。runc 作为子进程运行；它返回时
     （BuildKit 会传入 `--keep`，因此 rootfs 仍处于挂载状态），仅当该目录的内容
@@ -204,6 +213,8 @@ Guest 组件：
 - `orbit` 是安装后的命令：`up` 和 `down` 运行 `vmm-up.sh`，`update` 和 `rollback`
   运行 `update.sh`，`status` 报告状态，`uninstall` 移除 agent、健康检查的临时目录和
   `~/.orbit`。Makefile 的运行类 target 都调用它，因此不会运行 checkout 中的任何内容。
+  `orbit k8s up|down|status` 创建和删除节点按上述方式配置的 kind 集群；
+  `uninstall` 也会删除它们，同时移除它们的 kubectl 上下文。
 - `update.sh`（`orbit update`、`orbit rollback`）在自己的 clone（`~/.orbit/src`，
   克隆的是 `~/.orbit/bin/VERSION` 中记录的仓库）中构建发布标签，在暂存目录中构建新的 guest，保留之前的二进制文件和 guest 以便
   回滚，并且只在没有容器运行时才重启虚拟机。

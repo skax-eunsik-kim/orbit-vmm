@@ -33,7 +33,7 @@ memory), और container के exit होने के 30 s और 90 s ब�
 
 ## डेवलपर वर्कफ़्लो
 
-`bench/devflow/devflow.sh` 26 checks चलाता है:
+`bench/devflow/devflow.sh` 28 checks चलाता है:
 
 - healthchecks के साथ compose up, और Mac से published ports
 - service DNS और `host.docker.internal`
@@ -42,9 +42,40 @@ memory), और container के exit होने के 30 s और 90 s ब�
 - TLS proxy के पीछे HTTPS और एक amd64 image
 - एक BuildKit build (`# syntax`, ghcr, apt/uv cache mounts) और एक alembic
   migration
+- hostile build steps (symlinked या swapped CA directories, भरी हुई disk) के सामने
+  guest का CA wrapper, और एक RHEL (UBI) build जिसका bundle एक symlink है
 - logs, exec, stats और clock skew
 
-मौजूदा नतीजा: 26/26 pass।
+मौजूदा नतीजा: 28/28 pass।
+
+## Kubernetes
+
+`bench/k8s/k8s.sh` `orbit k8s` (kind v0.33, Kubernetes v1.37, एक
+node) की जाँच करता है और VMM का `phys_footprint` record करता है। macOS 26.4, M-series पर
+एक isolated instance (8 GiB, 6 vCPUs) पर तीन runs, 2026-10-27:
+
+| | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| `orbit k8s up` (node Ready) | 43 s | 45 s | 40 s |
+| Cluster से पहले VM | 2019 MiB | 2797 MiB | 2300 MiB |
+| Cluster idle (60 s) | 3267 MiB | 3757 MiB | 4036 MiB |
+| 20 nginx pods | 4417 MiB | 5247 MiB | 4598 MiB |
+| `orbit k8s down` के 60 s बाद | 2685 MiB | 2302 MiB | 2047 MiB |
+| 1 → 20 pods Ready तक scale | 14 s | 5 s | 5 s |
+
+"पहले" में पिछले runs का छोड़ा हुआ page cache शामिल है, इसलिए यह बदलता रहता है। हर 30 s पर
+लिए गए एक अलग trace ने दिखाया कि cluster delete होने के 90 s बाद VM अपने pre-cluster size से
+नीचे लौट आया (पहले 1686 MiB, बाद में 1468 MiB)।
+
+macOS "warn" memory pressure के तहत (`ORBIT_PRESSURE=warn` से pinned), cluster idle
+रहते हुए, हर एक एक minute:
+
+| memd | Page cache refaulted | Disk reads + writes | Page cache held |
+|---|---|---|---|
+| #33 से पहले | 2.7 GB | 3.4 GB | 460–510 MiB |
+| बाद में | 0.09–0.2 GB | 0.14–0.27 GB | लगभग 600 MiB |
+
+मौजूदा नतीजा: 13/13 pass।
 
 ## स्थिरता
 
