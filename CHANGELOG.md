@@ -5,7 +5,7 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.2.2] - 2026-10-26
+## [0.2.2] - 2026-10-27
 
 ### Security
 
