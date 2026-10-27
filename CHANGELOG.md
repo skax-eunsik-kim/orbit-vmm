@@ -5,6 +5,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-27
+
 ### Added
 
 - `orbit k8s up|down|status`: a Kubernetes cluster in the VM through
