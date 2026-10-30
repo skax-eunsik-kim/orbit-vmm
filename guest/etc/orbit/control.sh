@@ -27,6 +27,10 @@ case "$cmd" in
     if [ "$level" = normal ]; then rm -f /run/orbit-pressure; else echo "$level" > /run/orbit-pressure; fi
     [ "$level" = "$old" ] || setsid /etc/orbit/memd.sh reclaim "$level" </dev/null >/dev/null 2>&1 &
     echo ok ;;
+  # The Mac's disk is low: free what can go. Detached: it can take minutes.
+  gc\ *)
+    setsid /etc/orbit/imagegc.sh "${cmd#gc }" </dev/null >/dev/null 2>&1 &
+    echo ok ;;
   meminfo) awk '/^(MemTotal|MemAvailable):/{print $1, $2}' /proc/meminfo ;;
   shutdown) echo ok; poweroff ;;
   *) echo "unknown: $cmd" ;;

@@ -100,6 +100,8 @@ check "build: RUN --mount on CA dir kept" bash -c "printf 'FROM python:3.12-slim
 # The guest's own wrapper against hostile build steps: symlinked or swapped CA
 # directories, a full disk, host roots copied around (#24).
 check "orbit-runc: hostile build steps" bash -c "${D[*]} run --rm -i --privileged --pid=host alpine:3.22 nsenter -t 1 -m -- sh -s /etc/orbit/orbit-runc < '$HERE/orbit-runc-test.sh'"
+# Old unused images go when the Mac's disk is low; what's in use or kept doesn't (#36).
+check "imagegc: removes and keeps" bash -c "${D[*]} run --rm -i --privileged --pid=host alpine:3.22 nsenter -t 1 -m -- sh -s /etc/orbit/imagegc.sh < '$HERE/imagegc-test.sh'"
 
 # 11. alembic upgrade head against the compose postgres
 check "alembic upgrade head" "${D[@]}" run --rm --network orbittest_default \
