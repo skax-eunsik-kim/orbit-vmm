@@ -7,9 +7,11 @@
 #    socket every 30 s. After 3 missed pings in a row the VMM gets SIGABRT
 #    (macOS writes a crash report with every thread's stack), then SIGKILL.
 #  - Disk guard: the data disk is a file on the Mac. Below ORBIT_WARN_FREE_GB
-#    (10) free on its volume you get a notification; below ORBIT_STOP_FREE_GB
-#    (3) the guest is shut down cleanly before the disk fills (a full disk
-#    corrupts the guest's ext4), and it isn't restarted.
+#    (10) free on its volume you get a notification and the guest removes old
+#    unused images (ORBIT_IMAGE_GC_DAYS, 7; 0 turns that off) at most once an
+#    hour; below ORBIT_STOP_FREE_GB (3) the guest is shut down cleanly before
+#    the disk fills (a full disk corrupts the guest's ext4), and it isn't
+#    restarted.
 #  - Every abnormal exit is recorded under <instance dir>/crashes/<time>/
 #    (console log, crash report, watchdog log). The 10 newest are kept.
 #  - Exit status: 0 = stopped on purpose (guest powered off, `orbit down`, or
@@ -48,6 +50,7 @@ echo $$ > "$D/run.pid"
 free_gb() { df -k "$D" | awk 'NR == 2 { print int($4 / 1048576) }'; }
 WARN_GB=${ORBIT_WARN_FREE_GB:-10}
 STOP_GB=${ORBIT_STOP_FREE_GB:-3}
+GC_DAYS=${ORBIT_IMAGE_GC_DAYS:-7}
 # The VMM's own guard logs at the same level we notify at, and holds guest
 # writes below ORBIT_DISK_FLOOR_MIB (1 GiB), a last resort under STOP_GB.
 export ORBIT_DISK_WARN_MIB=${ORBIT_DISK_WARN_MIB:-$(( WARN_GB * 1024 ))}
@@ -132,7 +135,7 @@ trap stop TERM INT
 watch() {
   # Grace period: the first boot installs packages and can take minutes.
   for _ in $(seq 1 120); do ping_ok && break; kill -0 "$P" 2>/dev/null || return; sleep 5; done
-  local misses=0 last now gb warned=0
+  local misses=0 last now gb warned=0 gc_at=0
   last=$(date +%s)
   while kill -0 "$P" 2>/dev/null; do
     sleep 30
@@ -145,6 +148,10 @@ watch() {
     elif [ "$gb" -lt "$WARN_GB" ]; then
       [ $warned = 1 ] || { log "Mac disk has ${gb} GB free"; notify "Mac disk is getting full (${gb} GB free). docker system prune frees space."; }
       warned=1
+      if [ "$GC_DAYS" != 0 ] && [ $(($(date +%s) - gc_at)) -ge 3600 ]; then
+        gc_at=$(date +%s)
+        log "removing unused images older than ${GC_DAYS} days: $(ctl "gc $GC_DAYS")"
+      fi
     else
       warned=0
     fi

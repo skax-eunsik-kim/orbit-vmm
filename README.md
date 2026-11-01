@@ -148,6 +148,7 @@ call it.
 | `ORBIT_SHARE_ALLOW` | see below | Colon-separated directories that containers may bind-mount. |
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac disk free space at which the VM warns you, and at which it shuts down cleanly before its disk fills. |
+| `ORBIT_IMAGE_GC_DAYS` | `7` | Below `ORBIT_WARN_FREE_GB`, remove unused images and build cache older than this (see [Data disk](#data-disk)). `0` turns it off. |
 | `ORBIT_INSTANCE` | (unset) | Run a separate VM with its own disk and sockets under `~/.orbit/vmm-<name>`. |
 | `ORBIT_PRESSURE` | (follow the Mac) | `off` stops passing macOS memory pressure to the guest; `warn` or `critical` pins the level (for measurements). |
 | `ORBIT_FS_OWNERSHIP` | (emulated) | `host` shows bind-mounted files with their real Mac owner and mode instead of the emulated ones. |
@@ -237,8 +238,17 @@ python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(
 written, up to its logical size (`vmm-up.sh` prints both). It grows silently,
 so two guards watch the Mac's free space. The supervisor (`vmm-run.sh`)
 notifies you below `ORBIT_WARN_FREE_GB`, and shuts the guest down cleanly below
-`ORBIT_STOP_FREE_GB` (it won't start there either). Under that, as a last
-resort, the VMM checks every 2 seconds:
+`ORBIT_STOP_FREE_GB` (it won't start there either).
+
+Below `ORBIT_WARN_FREE_GB` the guest also frees what it can, at most once an
+hour: images older than `ORBIT_IMAGE_GC_DAYS` that no container uses (running or
+stopped), build cache of the same age, then a trim, so the space is back on the
+Mac right away. An image is old once both its build date and its arrival here
+are, whatever its last use. Images tagged `latest`, `local` or `dev` and all
+volumes are left alone. Each removal is logged to `console.log` as `[imagegc]`.
+Run `docker image prune -a` yourself to go further.
+
+Under that, as a last resort, the VMM checks every 2 seconds:
 
 - Below `ORBIT_DISK_WARN_MIB`, it logs `orbit-vmm: disk space low` to
   `console.log` (again every 10 minutes while it stays low), and

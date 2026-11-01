@@ -18,6 +18,7 @@ restart. Scripts run under busybox `ash`: keep them POSIX.
 | [`etc/orbit/control.sh`](etc/orbit/control.sh) | One command per host connection on vsock port 1025: ports, clock, memory pressure, shutdown. |
 | [`etc/orbit/fsnotify.sh`](etc/orbit/fsnotify.sh) | Turns Mac file changes into inotify events in the guest. |
 | [`etc/orbit/memd.sh`](etc/orbit/memd.sh) | Hands memory back: page-cache caps, reclaim on pressure, compaction, periodic `fstrim`. |
+| [`etc/orbit/imagegc.sh`](etc/orbit/imagegc.sh) | Removes old unused images and build cache when the Mac's disk is low, then trims. |
 | [`etc/orbit/binfmt.sh`](etc/orbit/binfmt.sh) | Registers qemu-x86_64 for `linux/amd64` images. |
 | [`etc/orbit/shutdown.sh`](etc/orbit/shutdown.sh) | Clean shutdown: stop dockerd, sync, unmount the data disk and shares. |
 

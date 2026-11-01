@@ -5,6 +5,13 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- When the Mac has less than `ORBIT_WARN_FREE_GB` free, the guest removes images
+  older than `ORBIT_IMAGE_GC_DAYS` (7; 0 turns it off) that no container uses,
+  and build cache of that age, then trims, at most once an hour. Images tagged
+  `latest`, `local` or `dev` and volumes are left alone (#36).
+
 ## [0.2.3] - 2026-10-27
 
 ### Added

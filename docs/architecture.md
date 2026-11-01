@@ -227,7 +227,8 @@ Guest pieces:
     without it, the supervisor records the stop and exits.
   - It stops restarting after more than three starts in 10 minutes.
   - It keeps a record of each unexpected stop in `crashes/<time>/`.
-  - It warns below `ORBIT_WARN_FREE_GB` and stops the VM cleanly below
+  - It warns below `ORBIT_WARN_FREE_GB`, where it also has the guest run
+    `imagegc.sh` at most once an hour, and stops the VM cleanly below
     `ORBIT_STOP_FREE_GB`.
 - `healthcheck.py`, if installed, checks Docker, ports, bind mounts, inotify,
   the clock and disk space, records the VMM's memory, threads and fds, and once
