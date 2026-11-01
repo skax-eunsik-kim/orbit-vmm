@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 export HOME="$T/home" USER=reportuser
+unset ORBIT_INSTANCE
 HOST=$(hostname -s)
 D="$HOME/.orbit/vmm"
 mkdir -p "$HOME/.orbit/bin" "$D/crashes/20261101-101010"

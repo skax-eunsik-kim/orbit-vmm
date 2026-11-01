@@ -54,8 +54,12 @@ trap 'exit 130' INT TERM
 
 : > "$OUT"
 say "commit $(git rev-parse --short HEAD)$(git diff --quiet HEAD -- . || echo ' (with uncommitted changes)')"
-make lint test >/dev/null 2>&1 && result PASS "make lint test" || result FAIL "make lint test"
-[ "$failed" = 0 ] || exit 1
+if lint=$(make lint test 2>&1); then result PASS "make lint test"
+else
+  echo "$lint" | tail -20
+  result FAIL "make lint test"
+  exit 1
+fi
 
 mkdir -p "$X/cache"
 cp "$HOME"/.orbit/cache/* "$X/cache/" 2>/dev/null # Alpine drops old packages, so a pinned kernel can 404
