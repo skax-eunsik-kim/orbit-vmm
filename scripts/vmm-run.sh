@@ -12,6 +12,7 @@
 #    hour; below ORBIT_STOP_FREE_GB (3) the guest is shut down cleanly before
 #    the disk fills (a full disk corrupts the guest's ext4), and it isn't
 #    restarted.
+#  - New releases: update-check.sh runs while the VM is up and tells you once.
 #  - Every abnormal exit is recorded under <instance dir>/crashes/<time>/
 #    (console log, crash report, watchdog log). The 10 newest are kept.
 #  - Exit status: 0 = stopped on purpose (guest powered off, `orbit down`, or
@@ -136,9 +137,14 @@ trap stop TERM INT
 watch() {
   # Grace period: the first boot installs packages and can take minutes.
   for _ in $(seq 1 120); do ping_ok && break; kill -0 "$P" 2>/dev/null || return; sleep 5; done
-  local misses=0 last now gb warned=0 gc_at=0
+  local misses=0 last now gb warned=0 gc_at=0 update_at=0
   last=$(date +%s)
   while kill -0 "$P" 2>/dev/null; do
+    # Hourly, in case the Mac was offline: it asks the network once a day.
+    if [ $(($(date +%s) - update_at)) -ge 3600 ]; then
+      update_at=$(date +%s)
+      "$HERE/update-check.sh" &
+    fi
     sleep 30
     gb=$(free_gb)
     if [ "$gb" -lt "$STOP_GB" ]; then

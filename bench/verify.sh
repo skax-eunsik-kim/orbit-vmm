@@ -101,6 +101,9 @@ mutant "no argument check" '/^case /d'
 
 enough_memory
 
+[ -f "$X/bin/update-state" ] && result PASS "supervisor looked up the latest release" ||
+  result FAIL "supervisor didn't look up the latest release"
+
 report=$("$X/bin/orbit" report --no-open </dev/null)
 rm -f "$HOME/$(sed -n 's/^Saved ~\/\([^,]*\),.*/\1/p' <<< "$report")"
 grep -q 'VM: running' <<< "$report" && result PASS "orbit report on a running VM" ||

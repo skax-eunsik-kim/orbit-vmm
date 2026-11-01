@@ -16,7 +16,7 @@
                  fs   ─ FUSE passthrough of allowed dirs under /Users
                  balloon ─ free page reporting → memory back to macOS
  launchd ── vmm-run.sh (supervisor: restart, disk guard, crash records)
-         └─ healthcheck.py (hourly: checks, resource use, release notice)
+         └─ healthcheck.py (hourly: checks, resource use)
 ```
 
 ## VMM (`vmm/`)

@@ -33,6 +33,7 @@ status() {
   fi
   local agent="com.orbit.vmm${ORBIT_INSTANCE:+.$ORBIT_INSTANCE}"
   if launchctl print "gui/$(id -u)/$agent" >/dev/null 2>&1; then echo "watchdog: $agent"; else echo "watchdog: not installed"; fi
+  "$BIN/update-check.sh" --hint
 }
 
 uninstall() {

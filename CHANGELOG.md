@@ -5,6 +5,12 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- New releases now reach everyone: the supervisor checks once a day while the VM
+  runs, so the notice no longer needs the optional health check. `orbit status`
+  and `orbit up` mention a newer release too. Nothing installs by itself (#46).
+
 ## [0.2.5] - 2026-11-01
 
 ### Added

@@ -47,6 +47,7 @@ rollback:
 test:
 	cd vmm && cargo test
 	scripts/report-test.sh
+	scripts/update-check-test.sh
 
 lint:
 	cd vmm && cargo fmt --check

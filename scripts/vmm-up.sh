@@ -68,6 +68,7 @@ for _ in $(seq 1 1500); do
   if curl -s -m 2 --unix-socket "$S" http://d/_ping 2>/dev/null | grep -q OK; then
     cat "$D/warnings" >&2 2>/dev/null
     echo "docker ready: export DOCKER_HOST=unix://$S"
+    "$HERE/update-check.sh" --hint
     exit 0
   fi
   [ -f "$D/want-running" ] || { echo "VM did not start:" >&2; tail -n 3 "$D/watchdog.log" >&2; echo "see $D/console.log" >&2; exit 1; }
