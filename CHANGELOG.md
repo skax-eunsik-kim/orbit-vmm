@@ -5,6 +5,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-01
+
 ### Added
 
 - When the Mac has less than `ORBIT_WARN_FREE_GB` free, the guest removes images
