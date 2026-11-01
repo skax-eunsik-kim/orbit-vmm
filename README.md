@@ -149,6 +149,7 @@ call it.
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac disk free space at which the VM warns you, and at which it shuts down cleanly before its disk fills. |
 | `ORBIT_IMAGE_GC_DAYS` | `7` | Below `ORBIT_WARN_FREE_GB`, remove unused images and build cache older than this (see [Data disk](#data-disk)). `0` turns it off. |
+| `ORBIT_NOTIFY` | `1` | `0` turns off macOS notifications. Warnings still reach `watchdog.log`. |
 | `ORBIT_INSTANCE` | (unset) | Run a separate VM with its own disk and sockets under `~/.orbit/vmm-<name>`. |
 | `ORBIT_PRESSURE` | (follow the Mac) | `off` stops passing macOS memory pressure to the guest; `warn` or `critical` pins the level (for measurements). |
 | `ORBIT_FS_OWNERSHIP` | (emulated) | `host` shows bind-mounted files with their real Mac owner and mode instead of the emulated ones. |

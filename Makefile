@@ -3,7 +3,7 @@ SHELL := /bin/bash
 DOCKER_SOCK := unix://$(HOME)/.orbit/vmm/docker.sock
 SH_FILES := $(shell git ls-files '*.sh' scripts/orbit guest/init 'guest/etc/orbit/*' 'vmm/guest/init-*' | grep -v '\.py$$' | sort -u)
 
-.PHONY: help guest build install up down update rollback test lint fmt devflow clean
+.PHONY: help guest build install up down update rollback test lint fmt devflow verify clean
 
 help:
 	@echo "make guest    download + build the guest kernel/initramfs (~/.orbit/guest)"
@@ -16,6 +16,7 @@ help:
 	@echo "make lint     cargo fmt --check, clippy -D warnings, shellcheck"
 	@echo "make test     cargo test"
 	@echo "make devflow  run the developer-workflow checks against the running VM"
+	@echo "make verify   every local check for a PR, on a throwaway instance"
 
 guest:
 	./scripts/fetch-guest.sh
@@ -56,6 +57,9 @@ fmt:
 
 devflow:
 	bench/devflow/devflow.sh orbit-vmm -H $(DOCKER_SOCK)
+
+verify:
+	bench/verify.sh
 
 clean:
 	cd vmm && cargo clean

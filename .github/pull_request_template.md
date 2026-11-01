@@ -5,7 +5,7 @@
 ## Testing
 
 <!-- CI can't boot VMs. Paste results of the relevant local checks
-     (see CONTRIBUTING.md), e.g. `== orbit-vmm: 21 pass, 0 fail`. -->
+     (see CONTRIBUTING.md): `make verify` prints a block to paste. -->
 
 - [ ] `make lint test` passes
 - [ ] devflow / other relevant benchmarks run locally (results above)

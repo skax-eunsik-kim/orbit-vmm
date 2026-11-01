@@ -28,7 +28,14 @@ is easy to get wrong. `CLAUDE.md` only imports this file.
 ## Verifying a change
 
 CI builds, lints and unit-tests but cannot boot a VM. Run the checks yourself,
-in an **isolated instance**, never on the shared VM someone is using:
+in an **isolated instance**, never on the shared VM someone is using. `make verify`
+does all of it on a throwaway instance and leaves a result to paste into the PR:
+lint and tests, a rebuilt guest, devflow, each `imagegc.sh` guard reverted, and the
+low-disk path. It stops if macOS reports under 25% of memory free. Go by that,
+not free swap: macOS keeps swap full long after the memory is back. A new guard
+or a new supervisor path belongs in `bench/verify.sh`.
+
+To run the steps by hand, or anything it doesn't cover:
 
 ```bash
 make build
