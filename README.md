@@ -243,11 +243,10 @@ notifies you below `ORBIT_WARN_FREE_GB`, and shuts the guest down cleanly below
 Below `ORBIT_WARN_FREE_GB` the guest also frees what it can, at most once an
 hour: images older than `ORBIT_IMAGE_GC_DAYS` that no container uses (running or
 stopped), build cache of the same age, then a trim, so the space is back on the
-Mac right away. An image's age counts from when it was built or pulled here, not
-from its last use. Images
-tagged `latest`, `local` or `dev` and all volumes are left alone. Each removal is
-logged to `console.log` as `[imagegc]`. Run `docker image prune -a` yourself to
-go further.
+Mac right away. An image is old once both its build date and its arrival here
+are, whatever its last use. Images tagged `latest`, `local` or `dev` and all
+volumes are left alone. Each removal is logged to `console.log` as `[imagegc]`.
+Run `docker image prune -a` yourself to go further.
 
 Under that, as a last resort, the VMM checks every 2 seconds:
 

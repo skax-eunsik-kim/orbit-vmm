@@ -25,11 +25,14 @@ hours=$((days * 24))
 ctrs=$(docker ps -aq --no-trunc) || exit 1
 used=$(echo "$ctrs" | xargs -r docker inspect -f '{{.Image}}') || exit 1
 list=$(docker images -a --no-trunc --filter "until=${hours}h" ${ref:+--filter "reference=$ref"} \
-  --format '{{.ID}} {{.Repository}}:{{.Tag}}') || exit 1
+  --format '{{.ID}} {{.Repository}}:{{.Tag}} {{.CreatedAt}}') || exit 1
+# until= goes by when the tag first appeared here, which a rebuild doesn't move.
+cutoff=$(date -u -d "@$(($(date +%s) - hours * 3600))" +%Y%m%d%H%M%S)
 
 removed=0
-while read -r id name; do
+while read -r id name created; do
   [ -n "$id" ] || continue
+  [ "$(echo "$created" | tr -dc 0-9 | cut -c1-14)" -lt "$cutoff" ] || continue
   echo "$used" | grep -qxF "$id" && continue
   case $name in
     *:latest | *:local | *:dev) continue ;;
