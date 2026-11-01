@@ -11,23 +11,25 @@ image() { # image <tag> [build flag...]
 old() { image "$1" --build-arg SOURCE_DATE_EPOCH=1000000000; }
 has() { docker image inspect "orbittest/gc:$1" >/dev/null 2>&1; }
 gone() { ! has "$1"; }
+volume() { docker volume inspect orbittest-gc >/dev/null 2>&1; }
 want() { "$@" || { echo "not as expected: $*"; fail=1; }; }
 clean() {
   docker rm -f orbittest-gc >/dev/null 2>&1
   docker volume rm orbittest-gc >/dev/null 2>&1
-  for t in unused stopped latest local dev new; do docker rmi "orbittest/gc:$t" >/dev/null 2>&1; done
+  for t in unused stopped stopped2 latest local dev new; do docker rmi "orbittest/gc:$t" >/dev/null 2>&1; done
 }
 clean
 for t in unused stopped latest local dev; do old "$t"; done
 image new
+docker tag orbittest/gc:stopped orbittest/gc:stopped2
 docker create --name orbittest-gc orbittest/gc:stopped true >/dev/null
 docker volume create orbittest-gc >/dev/null
 
 "$GC" 7 orbittest/gc || { echo "imagegc exited $?"; fail=1; }
 
 want gone unused
-for t in stopped latest local dev new; do want has "$t"; done
-want docker volume inspect orbittest-gc
+for t in stopped stopped2 latest local dev new; do want has "$t"; done
+want volume
 "$GC" 0 >/dev/null 2>&1; want test $? = 2
 "$GC" '7;x' >/dev/null 2>&1; want test $? = 2
 clean

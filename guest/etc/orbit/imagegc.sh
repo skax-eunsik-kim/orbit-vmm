@@ -24,7 +24,7 @@ hours=$((days * 24))
 # An empty list here would look like "nothing is in use".
 ctrs=$(docker ps -aq --no-trunc) || exit 1
 used=$(echo "$ctrs" | xargs -r docker inspect -f '{{.Image}}') || exit 1
-list=$(docker images --no-trunc --filter "until=${hours}h" ${ref:+--filter "reference=$ref"} \
+list=$(docker images -a --no-trunc --filter "until=${hours}h" ${ref:+--filter "reference=$ref"} \
   --format '{{.ID}} {{.Repository}}:{{.Tag}}') || exit 1
 
 removed=0
