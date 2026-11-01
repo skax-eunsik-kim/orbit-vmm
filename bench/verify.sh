@@ -97,6 +97,11 @@ mutant "no argument check" '/^case /d'
 
 enough_memory
 
+report=$("$X/bin/orbit" report --no-open </dev/null)
+rm -f "$HOME/$(sed -n 's/^Saved ~\/\([^,]*\),.*/\1/p' <<< "$report")"
+grep -q 'VM: running' <<< "$report" && result PASS "orbit report on a running VM" ||
+  result FAIL "orbit report on a running VM"
+
 # The low-disk path, through the real supervisor. Its first disk check is 30 s
 # after the guest answers. The level is well above the Mac's free space, which
 # grows once the VM stops. A stand-in osascript records notifications.

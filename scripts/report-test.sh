@@ -31,7 +31,7 @@ pulled alpine@sha256:abc123 for $HOME/project
 user $USER on host $HOST
 TOKEN=plain-token-value password: hunter2 "api_key": "k-123"
 Authorization: Bearer bearer-value
-clone https://bob:url-pass@git.example.com/x.git
+clone https://bob:url-pass@gitlab:8080/x.git
 ghp_0123456789abcdefghijklmnopqrstuvwxyz and sk-abcdefghijklmnop1234
 mail me at someone@example.com
 -----BEGIN CERTIFICATE-----

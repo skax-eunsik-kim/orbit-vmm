@@ -7,6 +7,10 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- `orbit report` prepares an issue in one command: a summary of fixed fields
+  for the public draft, and a file of recent logs for your team, with personal
+  details and secrets hidden by pattern. Nothing is sent: you submit the draft
+  and send the file yourself (#43).
 - `ORBIT_NOTIFY=0` silences orbit's macOS notifications, for test instances (#41).
 - `make verify` runs every local check for a PR on a throwaway instance (#41).
 
