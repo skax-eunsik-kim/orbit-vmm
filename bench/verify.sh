@@ -27,6 +27,13 @@ result() { # result <PASS|FAIL> <what>
 }
 up() { "$X/bin/vmm-up.sh" >/dev/null 2>&1 || { result FAIL "VM didn't start"; exit 1; }; }
 stop() { "$X/bin/vmm-up.sh" --stop >/dev/null 2>&1; }
+# The guard stopped the VM: don't start it again for the next step.
+enough_memory() {
+  [ -e "$X/out-of-memory" ] || return 0
+  result FAIL "stopped early: memory ran out"
+  say "== verify: FAIL"
+  exit 1
+}
 
 now=$(free_pct)
 [ "$now" -ge "$MIN_FREE" ] || { echo "only ${now}% of memory free (need ${MIN_FREE}%+); not starting" >&2; exit 1; }
@@ -72,6 +79,7 @@ bench/devflow/devflow.sh "$INST" -H "$DOCKER_HOST" | tee "$X/devflow.out"
 total=$(tail -1 "$X/devflow.out" | sed 's/.*: //')
 case $total in *" 0 fail") result PASS "devflow: $total" ;; *) result FAIL "devflow: $total" ;; esac
 grep '^FAIL' "$X/devflow.out" >> "$OUT"
+enough_memory
 
 # Each guard must be what keeps the test green.
 mutant() { # mutant <what> <sed expression>
@@ -86,6 +94,8 @@ mutant "no kept tags" '/\*:latest | \*:local/d'
 mutant "no build date check" '/tr -dc 0-9/d'
 mutant "no arrival date check" 's/--filter "until=${hours}h" \${ref/${ref/'
 mutant "no argument check" '/^case /d'
+
+enough_memory
 
 # The low-disk path, through the real supervisor. Its first disk check is 30 s
 # after the guest answers. The level is well above the Mac's free space, which
@@ -122,7 +132,7 @@ sleep 35 # one more disk check
   result FAIL "low disk: ran $(logged 'removing unused images') times"
 grep -aq 'fstrim' "$D/console.log" && result PASS "low disk: trimmed" || result FAIL "low disk: no trim"
 
-[ ! -e "$X/out-of-memory" ] || result FAIL "stopped early: memory ran out"
+enough_memory
 [ "$failed" = 0 ] && say "== verify: pass" || say "== verify: FAIL"
 echo "paste into the PR: $OUT"
 exit "$failed"
