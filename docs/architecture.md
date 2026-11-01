@@ -16,7 +16,7 @@
                  fs   ─ FUSE passthrough of allowed dirs under /Users
                  balloon ─ free page reporting → memory back to macOS
  launchd ── vmm-run.sh (supervisor: restart, disk guard, crash records)
-         └─ healthcheck.py (hourly: checks, resource use, release notice)
+         └─ healthcheck.py (hourly: checks, resource use)
 ```
 
 ## VMM (`vmm/`)
@@ -231,9 +231,10 @@ Guest pieces:
     `imagegc.sh` at most once an hour, and stops the VM cleanly below
     `ORBIT_STOP_FREE_GB`.
 - `healthcheck.py`, if installed, checks Docker, ports, bind mounts, inotify,
-  the clock and disk space, records the VMM's memory, threads and fds, and once
-  a day reads the latest release from the `releases/latest` page and shows one
-  notification per newer release.
+  the clock and disk space, and records the VMM's memory, threads and fds.
+- `update-check.sh` runs under the supervisor. Once a day it reads the latest
+  release from the `releases/latest` page and shows one notification per newer
+  release; `orbit status` and `orbit up` repeat that from its saved answer.
 - `orbit` is the installed command: `up` and `down` run `vmm-up.sh`, `update`
   and `rollback` run `update.sh`, `status` reports, and `uninstall` removes the
   agents, the health check's scratch directories and `~/.orbit`. The

@@ -274,6 +274,11 @@ orbit update           # the latest release; --to v0.2.1 for a given one
 orbit rollback         # back to what was installed before the last update
 ```
 
+orbit never updates itself. While the VM runs, it looks up the latest release
+once a day and shows one macOS notification per new release, and `orbit status`
+and `orbit up` mention it. Only the installed version and the repository's
+public release page are involved; nothing is sent about you.
+
 `orbit update` builds the release in its own clone (`~/.orbit/src`) of the
 repository recorded at install time, not in your checkout, and builds the new
 guest before replacing anything, so a failed download or build leaves the

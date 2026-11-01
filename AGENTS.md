@@ -139,5 +139,5 @@ Owner-initiated only:
    `version` in `vmm/Cargo.toml` and `vmm/Cargo.lock`.
 2. After merge: `gh release create vX.Y.Z --target <merge commit> --notes-file …`
    with short user-facing notes: highlights, how to upgrade, known limitations.
-3. Users get it with `orbit update`; the health check announces it. Both follow
+3. Users get it with `orbit update`; `update-check.sh` announces it. Both follow
    tags only, so nothing on `main` reaches users before it is released.
