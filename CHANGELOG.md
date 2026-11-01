@@ -5,6 +5,11 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `ORBIT_NOTIFY=0` silences orbit's macOS notifications, for test instances (#41).
+- `make verify` runs every local check for a PR on a throwaway instance (#41).
+
 ## [0.2.4] - 2026-11-01
 
 ### Added

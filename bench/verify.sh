@@ -35,7 +35,11 @@ now=$(free_pct)
 guard=
 cleanup() {
   [ -z "$guard" ] || kill "$guard" 2>/dev/null
+  local sup
+  sup=$(cat "$D/run.pid" 2>/dev/null)
   [ ! -x "$X/bin/vmm-up.sh" ] || stop
+  # After Ctrl-C it may still be writing a crash record there.
+  for _ in $(seq 1 60); do [ -n "$sup" ] && kill -0 "$sup" 2>/dev/null || break; sleep 0.5; done
   rm -rf "$X" "$D"
 }
 trap cleanup EXIT
