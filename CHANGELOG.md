@@ -5,6 +5,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-01
+
 ### Changed
 
 - New releases now reach everyone: the supervisor checks once a day while the VM
