@@ -34,7 +34,7 @@ repo=$(field "$BIN/VERSION" repo)
 # redirects to the latest release's tag with no such limit. /usr/bin/curl uses
 # the macOS trust store, so it works behind TLS inspection.
 url=$("${ORBIT_CURL:-/usr/bin/curl}" -sS -o /dev/null --max-time 10 -w '%{redirect_url}' \
-  "${ORBIT_RELEASES_URL:-https://github.com/$repo/releases/latest}" 2>/dev/null) || exit 0
+  "${ORBIT_RELEASES_URL:-https://github.com/$repo/releases/latest}" 2>/dev/null)
 tag=${url##*/tag/}
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 0
 

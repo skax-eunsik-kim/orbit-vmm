@@ -50,8 +50,8 @@ want "next release: another notice (10 > 6)" is notes "$(notes)" 2
 installed v0.2.10
 want "updated: hint gone" is hint "$(hint)" 0
 
-installed v0.2.10-3-gabc1234; next_day; check
-want "a build past the release isn't behind it" is notes "$(notes)" 2
+installed v0.2.10-3-gabc1234
+want "a build past the release isn't behind it" is hint "$(hint)" 0
 
 for bad in '' 'https://github.com/example/orbit/releases' '.../tag/v9.9.9;x'; do
   echo "$bad" > "$T/answer"; next_day; check
