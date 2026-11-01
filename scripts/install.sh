@@ -22,7 +22,7 @@ for d in "$HOME"/{work,src,code,dev,projects,Developer} $(cat "$HOME"/.orbit/vmm
     break ;;
   esac
 done
-for f in "$REL/orbit-vmm" "$REL/liborbitclose.dylib" "$ROOT/scripts/orbit" "$ROOT/scripts/vmm-up.sh" "$ROOT/scripts/vmm-run.sh" "$ROOT/scripts/update.sh" "$ROOT/scripts/healthcheck.py"; do
+for f in "$REL/orbit-vmm" "$REL/liborbitclose.dylib" "$ROOT/scripts/orbit" "$ROOT/scripts/vmm-up.sh" "$ROOT/scripts/vmm-run.sh" "$ROOT/scripts/update.sh" "$ROOT/scripts/report.sh" "$ROOT/scripts/healthcheck.py"; do
   # Replace via rename so a running VM keeps its (unchanged) binary.
   install -m 700 "$f" "$BIN/.$(basename "$f").new"
   mv -f "$BIN/.$(basename "$f").new" "$BIN/$(basename "$f")"
