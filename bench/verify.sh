@@ -54,8 +54,12 @@ trap 'exit 130' INT TERM
 
 : > "$OUT"
 say "commit $(git rev-parse --short HEAD)$(git diff --quiet HEAD -- . || echo ' (with uncommitted changes)')"
-make lint test >/dev/null 2>&1 && result PASS "make lint test" || result FAIL "make lint test"
-[ "$failed" = 0 ] || exit 1
+if lint=$(make lint test 2>&1); then result PASS "make lint test"
+else
+  echo "$lint" | tail -20
+  result FAIL "make lint test"
+  exit 1
+fi
 
 mkdir -p "$X/cache"
 cp "$HOME"/.orbit/cache/* "$X/cache/" 2>/dev/null # Alpine drops old packages, so a pinned kernel can 404
@@ -96,6 +100,11 @@ mutant "no arrival date check" 's/--filter "until=${hours}h" \${ref/${ref/'
 mutant "no argument check" '/^case /d'
 
 enough_memory
+
+report=$("$X/bin/orbit" report --no-open </dev/null)
+rm -f "$HOME/$(sed -n 's/^Saved ~\/\([^,]*\),.*/\1/p' <<< "$report")"
+grep -q 'VM: running' <<< "$report" && result PASS "orbit report on a running VM" ||
+  result FAIL "orbit report on a running VM"
 
 # The low-disk path, through the real supervisor. Its first disk check is 30 s
 # after the guest answers. The level is well above the Mac's free space, which

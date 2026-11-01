@@ -428,16 +428,24 @@ docker CLI ──unix socket── orbit-vmm ──vsock── guest: dockerd
 
 ## Reporting a bug
 
-Open an [issue](https://github.com/skax-eunsik-kim/orbit-vmm/issues) with what
-you ran, what you expected and what happened, and attach:
+```bash
+orbit report
+```
 
-- the end of `~/.orbit/vmm/console.log` and `~/.orbit/vmm/watchdog.log`;
-- `sw_vers -productVersion` and `orbit status`;
-- for a crash, the newest `~/.orbit/vmm/crashes/<time>/` directory.
+It shows a short summary, and if you agree, opens a draft
+[issue](https://github.com/skax-eunsik-kim/orbit-vmm/issues) with it filled in.
+Add what you ran, what you expected and what happened, then submit it. The
+draft holds fixed fields only: versions, chip, memory, free disk, VM state,
+crash count and the names of settings you changed. Nothing is sent for you.
 
-Logs can contain paths and image names; check before posting. Never attach
-`~/.orbit/guest`, `data.img` or `host-ca.pem`: they hold your Mac's extra root
-certificates.
+It also saves `~/orbit-report-<time>.txt` with recent logs, so the people
+helping you can look further. Paths, your user and host names, emails, tokens,
+passwords and certificates are hidden by pattern, which can miss things, and
+image and internal host names stay. Read it, then send it privately. **Don't
+attach it to the issue**: this repository is public.
+
+Never attach `~/.orbit/guest`, `data.img` or `host-ca.pem`: they hold your Mac's
+extra root certificates.
 
 ## Contributing
 

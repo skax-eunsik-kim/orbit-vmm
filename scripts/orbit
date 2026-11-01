@@ -9,15 +9,16 @@
 #   orbit update [--to TAG] [--now]
 #   orbit rollback [--now]
 #   orbit uninstall [--yes]      remove orbit, its VMs and their data disks
+#   orbit report [--no-open]     summary and logs for raising an issue
 #   orbit k8s up|down|status [NAME] [kind create flags]
 #                                a Kubernetes cluster in the VM (kind)
 #
-# ORBIT_INSTANCE selects the instance for up, down, status, update, rollback
-# and k8s.
+# ORBIT_INSTANCE selects the instance for up, down, status, update, rollback,
+# report and k8s.
 set -euo pipefail
 BIN="$(cd "$(dirname "$0")" && pwd)"
 D="$HOME/.orbit/vmm${ORBIT_INSTANCE:+-$ORBIT_INSTANCE}"
-usage() { sed -n '6,13s/^# \{0,3\}//p' "$0" >&2; exit 2; }
+usage() { sed -n '6,14s/^# \{0,3\}//p' "$0" >&2; exit 2; }
 
 status() {
   echo "installed: $(sed -n 's/^version=//p' "$BIN/VERSION" 2>/dev/null || echo unknown) ($BIN)"
@@ -117,6 +118,7 @@ case "${1:-}" in
   update) shift; exec "$BIN/update.sh" "$@" ;;
   rollback) shift; exec "$BIN/update.sh" --rollback "$@" ;;
   uninstall) shift; uninstall "$@" ;;
+  report) shift; exec "$BIN/report.sh" "$@" ;;
   k8s) shift; k8s "$@" ;;
   *) usage ;;
 esac
