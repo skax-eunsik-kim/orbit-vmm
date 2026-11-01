@@ -29,6 +29,7 @@ WLOG="$D/watchdog.log"
 log() { echo "[$(date '+%F %T')] $*" >> "$WLOG"; }
 # Text goes in as arguments, never into the AppleScript source.
 notify() {
+  [ "${ORBIT_NOTIFY:-1}" != 0 ] || return 0
   osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title (item 2 of argv)' -e 'end run' \
     "$1" "orbit-vmm${ORBIT_INSTANCE:+ ($ORBIT_INSTANCE)}" >/dev/null 2>&1 || true
 }
