@@ -25,7 +25,7 @@ result() { # result <PASS|FAIL> <what>
   say "$1  $2"
   [ "$1" = PASS ] || failed=1
 }
-up() { "$X/bin/vmm-up.sh" 2>&1 | tail -1; }
+up() { "$X/bin/vmm-up.sh" >/dev/null 2>&1 || { result FAIL "VM didn't start"; exit 1; }; }
 stop() { "$X/bin/vmm-up.sh" --stop >/dev/null 2>&1; }
 
 now=$(free_pct)
@@ -65,8 +65,8 @@ guard=$!
 
 # devflow: its own lines go to the terminal, the total to the summary.
 bench/devflow/devflow.sh "$INST" -H "$DOCKER_HOST" | tee "$X/devflow.out"
-total=$(tail -1 "$X/devflow.out")
-case $total in *" 0 fail"*) result PASS "devflow $total" ;; *) result FAIL "devflow $total" ;; esac
+total=$(tail -1 "$X/devflow.out" | sed 's/.*: //')
+case $total in *" 0 fail") result PASS "devflow: $total" ;; *) result FAIL "devflow: $total" ;; esac
 grep '^FAIL' "$X/devflow.out" >> "$OUT"
 
 # Each guard must be what keeps the test green.
@@ -84,29 +84,39 @@ mutant "no arrival date check" 's/--filter "until=${hours}h" \${ref/${ref/'
 mutant "no argument check" '/^case /d'
 
 # The low-disk path, through the real supervisor. Its first disk check is 30 s
-# after the guest answers. Above the Mac's free space counts as low.
+# after the guest answers. The level is well above the Mac's free space, which
+# grows once the VM stops. A stand-in osascript records notifications.
+mkdir -p "$X/shim"
+printf '#!/bin/sh\ntouch "%s"\n' "$X/notified" > "$X/shim/osascript"
+chmod +x "$X/shim/osascript"
+export PATH="$X/shim:$PATH"
 old_image() {
   printf 'FROM scratch\nCOPY <<EOF /gc\nverify\nEOF\n' |
     docker build -q --no-cache --build-arg SOURCE_DATE_EPOCH=1000000000 -t orbittest/verify:old - >/dev/null
 }
 has_old() { docker image inspect orbittest/verify:old >/dev/null 2>&1; }
-cleaned() { grep -c 'removing unused images' "$D/watchdog.log"; }
-low=$(( $(df -g "$D" | awk 'NR == 2 { print $4 }') + 1 ))
+logged() { grep -c "$1" "$D/watchdog.log"; }
+low=$(( $(df -g "$D" | awk 'NR == 2 { print $4 }') + 50 ))
 old_image
 stop
-ORBIT_WARN_FREE_GB=$low ORBIT_IMAGE_GC_DAYS=0 up
-sleep 45
-if has_old && [ "$(cleaned)" = 0 ]; then result PASS "low disk, ORBIT_IMAGE_GC_DAYS=0: nothing removed"
+ORBIT_WARN_FREE_GB=$low ORBIT_IMAGE_GC_DAYS=0 ORBIT_NOTIFY=1 up
+for _ in $(seq 1 30); do [ "$(logged 'Mac disk has')" = 0 ] || break; sleep 2; done
+sleep 2
+if [ "$(logged 'Mac disk has')" = 0 ]; then result FAIL "low disk: the supervisor never noticed"
+elif has_old && [ "$(logged 'removing unused images')" = 0 ]; then result PASS "low disk, ORBIT_IMAGE_GC_DAYS=0: nothing removed"
 else result FAIL "low disk, ORBIT_IMAGE_GC_DAYS=0: something ran"; fi
+[ -e "$X/notified" ] && result PASS "low disk: notifies" || result FAIL "low disk: no notification"
 stop
+rm -f "$X/notified"
 ORBIT_WARN_FREE_GB=$low up
 for _ in $(seq 1 30); do has_old || break; sleep 2; done
 if has_old; then result FAIL "low disk: old image still there after 60 s"
 else result PASS "low disk: old image removed by the supervisor"; fi
+[ ! -e "$X/notified" ] && result PASS "ORBIT_NOTIFY=0: no notification" || result FAIL "ORBIT_NOTIFY=0: notified"
 sleep 35 # one more disk check
-[ "$(cleaned)" = 1 ] && result PASS "low disk: ran once, not on the next check" ||
-  result FAIL "low disk: ran $(cleaned) times"
-grep -q 'fstrim' "$D/console.log" && result PASS "low disk: trimmed" || result FAIL "low disk: no trim"
+[ "$(logged 'removing unused images')" = 1 ] && result PASS "low disk: ran once, not on the next check" ||
+  result FAIL "low disk: ran $(logged 'removing unused images') times"
+grep -aq 'fstrim' "$D/console.log" && result PASS "low disk: trimmed" || result FAIL "low disk: no trim"
 
 [ ! -e "$X/out-of-memory" ] || result FAIL "stopped early: memory ran out"
 [ "$failed" = 0 ] && say "== verify: pass" || say "== verify: FAIL"
