@@ -5,6 +5,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-01
+
 ### Added
 
 - `orbit report` prepares an issue in one command: a summary of fixed fields
