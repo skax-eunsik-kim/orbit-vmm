@@ -5,6 +5,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-11-05
+
 ### Fixed
 
 - The data disk no longer fills up while the Mac has room. Disks are now 256 GiB
