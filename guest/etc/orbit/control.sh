@@ -27,7 +27,9 @@ case "$cmd" in
     if [ "$level" = normal ]; then rm -f /run/orbit-pressure; else echo "$level" > /run/orbit-pressure; fi
     [ "$level" = "$old" ] || setsid /etc/orbit/memd.sh reclaim "$level" </dev/null >/dev/null 2>&1 &
     echo ok ;;
-  # The Mac's disk is low: free what can go. Detached: it can take minutes.
+  # Free space on the data disk in MiB, as non-root processes see it.
+  diskfree) df -m /data | awk 'NR == 2 { print $4 }' ;;
+  # A disk is low: free what can go. Detached: it can take minutes.
   gc\ *)
     setsid /etc/orbit/imagegc.sh "${cmd#gc }" </dev/null >/dev/null 2>&1 &
     echo ok ;;
