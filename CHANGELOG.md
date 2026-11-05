@@ -5,6 +5,21 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The data disk no longer fills up while the Mac has room. Disks are now 256 GiB
+  by default (sparse), and smaller ones grow on the next start. orbit also warns
+  and cleans up when the data disk itself is low, and only 512 MiB stays reserved
+  for root, so containers don't run out early (#49).
+
+### Changed
+
+- Clean-up now also removes containers that stopped more than
+  `ORBIT_IMAGE_GC_DAYS` ago and unused old images tagged `latest`, `local` or
+  `dev`, which is what stacks are made of. While a disk stays low, each run halves
+  the age limit, down to 1 day. Volumes, kind nodes and `restart: always`
+  containers stay; `0` turns it off (#49).
+
 ## [0.2.6] - 2026-11-01
 
 ### Changed

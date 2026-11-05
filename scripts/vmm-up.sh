@@ -34,7 +34,8 @@ stop_vm() {
 if [ "${1:-}" = --stop ]; then stop_vm && echo "stopped"; exit; fi
 
 # Sparse: only what Docker actually stores takes space on the Mac.
-[ -f "$D/data.img" ] || mkfile -n "${ORBIT_DISK_GB:-64}g" "$D/data.img"
+DISK_GB=${ORBIT_DISK_GB:-256}
+[ -f "$D/data.img" ] || mkfile -n "${DISK_GB}g" "$D/data.img"
 read -r free_k < <(df -k "$D" | awk 'NR == 2 { print $4 }')
 used_k=$(du -k "$D/data.img" | awk '{ print $1 }')
 echo "data disk $D/data.img: $(( used_k >> 20 )) GiB used of $(( $(stat -f %z "$D/data.img") >> 30 )) GiB; Mac disk has $(( free_k >> 20 )) GiB free"
@@ -50,11 +51,17 @@ if [ -n "${ORBIT_SHARE_ALLOW:-}" ]; then
   done
   ORBIT_SHARE_ALLOW=$abs
 fi
-for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_GUEST ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK ORBIT_WARN_FREE_GB ORBIT_STOP_FREE_GB ORBIT_IMAGE_GC_DAYS ORBIT_NOTIFY ORBIT_DISK_WARN_MIB ORBIT_DISK_FLOOR_MIB ORBIT_DISK_PAUSE_SECS ORBIT_PRESSURE ORBIT_FS_OWNERSHIP ORBIT_FS_TTL ORBIT_FS_ATTR_TTL_MS; do
+for v in ORBIT_MEM_MIB ORBIT_CPUS ORBIT_GUEST ORBIT_SHARE_ALLOW ORBIT_HOST_LOOPBACK ORBIT_WARN_FREE_GB ORBIT_STOP_FREE_GB ORBIT_VM_WARN_FREE_GB ORBIT_IMAGE_GC_DAYS ORBIT_IMAGE_GC_EVERY_S ORBIT_NOTIFY ORBIT_DISK_WARN_MIB ORBIT_DISK_FLOOR_MIB ORBIT_DISK_PAUSE_SECS ORBIT_PRESSURE ORBIT_FS_OWNERSHIP ORBIT_FS_TTL ORBIT_FS_ATTR_TTL_MS; do
   [ -n "${!v:-}" ] && printf '%s=%q\n' "$v" "${!v}"
 done > "$D/config.env"
 
 stop_vm || exit 1
+# A disk made smaller than this grows (the guest takes the space at boot); it
+# never shrinks. Sparse, so this costs the Mac nothing until it's used.
+if [ "$(stat -f %z "$D/data.img")" -lt $(( DISK_GB << 30 )) ]; then
+  truncate -s "${DISK_GB}g" "$D/data.img"
+  echo "data disk grown to $DISK_GB GiB"
+fi
 touch "$D/want-running" "$D/manual-start"
 if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
   launchctl kickstart "gui/$(id -u)/$LABEL"

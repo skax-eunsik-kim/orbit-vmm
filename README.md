@@ -141,14 +141,15 @@ call it.
 | `ORBIT_MEM_MIB` | `8192` | Guest RAM ceiling. Freed memory returns to macOS, so a high ceiling costs little. |
 | `ORBIT_CPUS` | Mac core count (`sysctl -n hw.ncpu`) | vCPUs. Idle vCPUs park and cost no CPU; with only a few, parallel container start-up (e.g. agent sandboxes) queues on CPU. |
 | `ORBIT_GUEST` | `~/.orbit/guest` | Directory with the guest `kernel` and `initramfs` (e.g. one built with `ORBIT_HOME=… scripts/fetch-guest.sh`). |
-| `ORBIT_DISK_GB` | `64` | Size of a **new** data disk (sparse file). |
+| `ORBIT_DISK_GB` | `256` | Size of the data disk (sparse file). A smaller one grows on the next start; none shrinks. |
 | `ORBIT_DISK_WARN_MIB` | `ORBIT_WARN_FREE_GB` in MiB | Below this much free space on the Mac, the VMM also warns in `console.log`. |
 | `ORBIT_DISK_FLOOR_MIB` | `1024` | Last resort under `ORBIT_STOP_FREE_GB`: below this, guest disk writes are held until space is freed (see [Data disk](#data-disk)). |
 | `ORBIT_DISK_PAUSE_SECS` | `600` | How long a held write waits before it fails. |
 | `ORBIT_SHARE_ALLOW` | see below | Colon-separated directories that containers may bind-mount. |
 | `ORBIT_HOST_LOOPBACK` | `1` | `0` stops containers from reaching services on the Mac's `127.0.0.1` (and `host.docker.internal`). |
 | `ORBIT_WARN_FREE_GB` / `ORBIT_STOP_FREE_GB` | `10` / `3` | Mac disk free space at which the VM warns you, and at which it shuts down cleanly before its disk fills. |
-| `ORBIT_IMAGE_GC_DAYS` | `7` | Below `ORBIT_WARN_FREE_GB`, remove unused images and build cache older than this (see [Data disk](#data-disk)). `0` turns it off. |
+| `ORBIT_VM_WARN_FREE_GB` | `10` | Free space on the data disk itself at which the VM warns you and cleans up. |
+| `ORBIT_IMAGE_GC_DAYS` | `7` | When a disk is low, remove stopped containers, unused images and build cache older than this (see [Data disk](#data-disk)). `0` turns it off. |
 | `ORBIT_NOTIFY` | `1` | `0` turns off macOS notifications. Warnings still reach `watchdog.log`. |
 | `ORBIT_INSTANCE` | (unset) | Run a separate VM with its own disk and sockets under `~/.orbit/vmm-<name>`. |
 | `ORBIT_PRESSURE` | (follow the Mac) | `off` stops passing macOS memory pressure to the guest; `warn` or `critical` pins the level (for measurements). |
@@ -226,12 +227,8 @@ remove the shared directories themselves.
 and your machine's trusted root certificates
 ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
-To grow the data disk, stop the VM, enlarge the file, and start the VM again.
-The guest resizes its filesystem on boot:
-
-```bash
-python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(p,max(os.path.getsize(p),128<<30))"
-```
+To make the data disk larger than the default, set `ORBIT_DISK_GB` and run `orbit up`.
+The guest resizes its filesystem on boot. It never shrinks.
 
 ### Data disk
 
@@ -241,13 +238,25 @@ so two guards watch the Mac's free space. The supervisor (`vmm-run.sh`)
 notifies you below `ORBIT_WARN_FREE_GB`, and shuts the guest down cleanly below
 `ORBIT_STOP_FREE_GB` (it won't start there either).
 
-Below `ORBIT_WARN_FREE_GB` the guest also frees what it can, at most once an
-hour: images older than `ORBIT_IMAGE_GC_DAYS` that no container uses (running or
-stopped), build cache of the same age, then a trim, so the space is back on the
-Mac right away. An image is old once both its build date and its arrival here
-are, whatever its last use. Images tagged `latest`, `local` or `dev` and all
-volumes are left alone. Each removal is logged to `console.log` as `[imagegc]`.
-Run `docker image prune -a` yourself to go further.
+The data disk can also fill up by itself, so you're told below
+`ORBIT_VM_WARN_FREE_GB` free on it too.
+
+Below either level the guest frees what it can, at most once an hour:
+
+- containers that stopped more than `ORBIT_IMAGE_GC_DAYS` ago, then images of that
+  age no container uses, **whatever their tag**, and build cache of that age;
+- then a trim, so the space is back on the Mac right away.
+
+A stack removed this way comes back with `docker compose up --build` or a new
+pull. While a disk stays low, each run halves the age limit, down to 1 day. An
+image is old once both its build date and its arrival here are, whatever its last
+use. All volumes, kind nodes and `restart: always` containers are left alone. Each
+removal is logged to `console.log` as `[imagegc]`. `ORBIT_IMAGE_GC_DAYS=0` turns
+this off, if you keep anything you couldn't rebuild in a stopped container or an
+unused image. Run `docker system prune -a` yourself to go further.
+
+512 MiB is reserved for root on the data disk, so containers don't run out of
+space long before Docker does.
 
 Under that, as a last resort, the VMM checks every 2 seconds:
 

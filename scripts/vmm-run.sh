@@ -7,8 +7,9 @@
 #    socket every 30 s. After 3 missed pings in a row the VMM gets SIGABRT
 #    (macOS writes a crash report with every thread's stack), then SIGKILL.
 #  - Disk guard: the data disk is a file on the Mac. Below ORBIT_WARN_FREE_GB
-#    (10) free on its volume you get a notification and the guest removes old
-#    unused images (ORBIT_IMAGE_GC_DAYS, 7; 0 turns that off) at most once an
+#    (10) free on its volume, or ORBIT_VM_WARN_FREE_GB (10) on the data disk
+#    itself, you get a notification and the guest removes old stopped containers
+#    and unused images (ORBIT_IMAGE_GC_DAYS, 7; 0 turns that off) at most once an
 #    hour; below ORBIT_STOP_FREE_GB (3) the guest is shut down cleanly before
 #    the disk fills (a full disk corrupts the guest's ext4), and it isn't
 #    restarted.
@@ -53,6 +54,8 @@ free_gb() { df -k "$D" | awk 'NR == 2 { print int($4 / 1048576) }'; }
 WARN_GB=${ORBIT_WARN_FREE_GB:-10}
 STOP_GB=${ORBIT_STOP_FREE_GB:-3}
 GC_DAYS=${ORBIT_IMAGE_GC_DAYS:-7}
+VM_WARN_GB=${ORBIT_VM_WARN_FREE_GB:-10}
+GC_EVERY_S=${ORBIT_IMAGE_GC_EVERY_S:-3600}
 # The VMM's own guard logs at the same level we notify at, and holds guest
 # writes below ORBIT_DISK_FLOOR_MIB (1 GiB), a last resort under STOP_GB.
 export ORBIT_DISK_WARN_MIB=${ORBIT_DISK_WARN_MIB:-$(( WARN_GB * 1024 ))}
@@ -134,10 +137,19 @@ stop() {
 }
 trap stop TERM INT
 
+# Still low an hour later means the last run found too little: images built
+# this week fill a disk too, so each run goes for younger ones, down to a day.
+free_space() {
+  [ "$GC_DAYS" != 0 ] && [ $(($(date +%s) - gc_at)) -ge "$GC_EVERY_S" ] || return 0
+  gc_at=$(date +%s)
+  log "removing unused images older than ${gc_days} days: $(ctl "gc $gc_days")"
+  [ "$gc_days" -le 1 ] || gc_days=$((gc_days / 2))
+}
+
 watch() {
   # Grace period: the first boot installs packages and can take minutes.
   for _ in $(seq 1 120); do ping_ok && break; kill -0 "$P" 2>/dev/null || return; sleep 5; done
-  local misses=0 last now gb warned=0 gc_at=0 update_at=0
+  local misses=0 last now gb warned=0 vm_warned=0 vm_mib gc_at=0 update_at=0 gc_days=$GC_DAYS
   last=$(date +%s)
   while kill -0 "$P" 2>/dev/null; do
     # Hourly, in case the Mac was offline: it asks the network once a day.
@@ -155,13 +167,22 @@ watch() {
     elif [ "$gb" -lt "$WARN_GB" ]; then
       [ $warned = 1 ] || { log "Mac disk has ${gb} GB free"; notify "Mac disk is getting full (${gb} GB free). docker system prune frees space."; }
       warned=1
-      if [ "$GC_DAYS" != 0 ] && [ $(($(date +%s) - gc_at)) -ge 3600 ]; then
-        gc_at=$(date +%s)
-        log "removing unused images older than ${GC_DAYS} days: $(ctl "gc $GC_DAYS")"
-      fi
+      free_space
     else
       warned=0
     fi
+    # The data disk can fill up with room left on the Mac. An older guest answers
+    # "unknown": that's no reason to act.
+    vm_mib=$(ctl diskfree)
+    case $vm_mib in '' | *[!0-9]*) vm_mib=$((VM_WARN_GB * 1024)) ;; esac
+    if [ "$vm_mib" -lt $((VM_WARN_GB * 1024)) ]; then
+      [ $vm_warned = 1 ] || { log "data disk has $((vm_mib / 1024)) GB free"; notify "orbit's data disk is getting full ($((vm_mib / 1024)) GB free). docker system prune frees space."; }
+      vm_warned=1
+      free_space
+    else
+      vm_warned=0
+    fi
+    [ $warned = 1 ] || [ $vm_warned = 1 ] || gc_days=$GC_DAYS
     now=$(date +%s)
     # A long gap means the Mac slept; the guest needs a moment after waking.
     [ $((now - last)) -gt 90 ] && misses=0

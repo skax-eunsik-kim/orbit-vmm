@@ -14,7 +14,7 @@ X="$HOME/.orbit-$INST"
 D="$HOME/.orbit/vmm-$INST"
 MIN_FREE=${ORBIT_VERIFY_MIN_FREE:-25}
 OUT="$ROOT/bench/devflow/results-verify-summary.txt"
-export ORBIT_INSTANCE=$INST ORBIT_GUEST="$X/guest" ORBIT_MEM_MIB=4096 ORBIT_CPUS=4 ORBIT_DISK_GB=20 ORBIT_NOTIFY=0
+export ORBIT_INSTANCE=$INST ORBIT_GUEST="$X/guest" ORBIT_MEM_MIB=4096 ORBIT_CPUS=4 ORBIT_DISK_GB=20 ORBIT_VM_WARN_FREE_GB=1 ORBIT_NOTIFY=0
 export DOCKER_HOST="unix://$D/docker.sock"
 GUEST=(docker run --rm -i --privileged --pid=host alpine:3.22 nsenter -t 1 -m --)
 failed=0
@@ -94,8 +94,11 @@ mutant() { # mutant <what> <sed expression>
   else result PASS "imagegc-test catches: $1"; fi
 }
 mutant "no in-use check" '/grep -qxF/d'
-mutant "no kept tags" '/\*:latest | \*:local/d'
-mutant "no build date check" '/tr -dc 0-9/d'
+mutant "no stopped-age check" '/-lt "$stopped_before"/d'
+mutant "no restart: always check" 's/\[ "$2" != always \] && //'
+mutant "no kind check" 's/ && \[ -z "${3:-}" \]//'
+mutant "containers outside the reference" '/if \[ -n "$ref" \]; then case/d'
+mutant "no build date check" '/digits "$created"/d'
 mutant "no arrival date check" 's/--filter "until=${hours}h" \${ref/${ref/'
 mutant "no argument check" '/^case /d'
 
@@ -143,6 +146,30 @@ sleep 35 # one more disk check
 [ "$(logged 'removing unused images')" = 1 ] && result PASS "low disk: ran once, not on the next check" ||
   result FAIL "low disk: ran $(logged 'removing unused images') times"
 grep -aq 'fstrim' "$D/console.log" && result PASS "low disk: trimmed" || result FAIL "low disk: no trim"
+
+enough_memory
+
+# The data disk filling up with room on the Mac: this one grows too, keeping
+# what's on it. Runs every 20 s here, to see the age limit come down.
+old_image
+stop
+before=$(logged 'removing unused images')
+rm -f "$X/notified"
+ORBIT_DISK_GB=30 ORBIT_WARN_FREE_GB=1 ORBIT_VM_WARN_FREE_GB=100 ORBIT_IMAGE_GC_EVERY_S=20 ORBIT_NOTIFY=1 up
+size=$("${GUEST[@]}" df -m /data | awk 'NR == 2 { print $2 }')
+[ "$size" -gt 28000 ] && result PASS "data disk grew to ${size} MiB" || result FAIL "data disk is ${size} MiB"
+reserved=$("${GUEST[@]}" tune2fs -l /dev/vda | awk '/^Reserved block count/ { print $NF }')
+[ "$reserved" = 131072 ] && result PASS "512 MiB reserved for root" || result FAIL "$reserved blocks reserved for root"
+for _ in $(seq 1 45); do has_old || break; sleep 2; done
+has_old && result FAIL "low data disk: old image still there" || result PASS "low data disk: old image removed"
+[ -e "$X/notified" ] && result PASS "low data disk: notifies" || result FAIL "low data disk: no notification"
+for _ in $(seq 1 45); do [ "$(logged 'older than 3 days')" = 0 ] || break; sleep 2; done
+[ "$(logged 'older than 3 days')" != 0 ] && result PASS "still low: age limit comes down" ||
+  result FAIL "still low: age limit stayed"
+stop
+ORBIT_DISK_GB=25 up
+size2=$("${GUEST[@]}" df -m /data | awk 'NR == 2 { print $2 }')
+[ "$size2" = "$size" ] && result PASS "data disk never shrinks" || result FAIL "data disk went from $size to $size2 MiB"
 
 enough_memory
 [ "$failed" = 0 ] && say "== verify: pass" || say "== verify: FAIL"

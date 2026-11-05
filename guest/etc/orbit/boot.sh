@@ -63,9 +63,16 @@ if ! mountpoint -q /data && ! mount_data; then
   mkfs.ext4 -q -L orbit-data -E lazy_itable_init=1,lazy_journal_init=1 /dev/vda
   mount_data || { log "data disk mount failed"; exit 1; }
 fi
-# The data disk image can be grown on the Mac (see README); take the space
-# before anything (packages, the root snapshot) needs it.
-command -v resize2fs >/dev/null && resize2fs /dev/vda >/dev/null 2>&1
+# The data disk image can grow on the Mac (see README); take the space before
+# anything (packages, the root snapshot) needs it. ext4 keeps 5% for root by
+# default, so containers not running as root would fail long before the disk is
+# full: keep a fixed 512 MiB, enough for dockerd to shut down cleanly.
+take_disk_space() {
+  command -v resize2fs >/dev/null || return 0
+  resize2fs /dev/vda >/dev/null 2>&1
+  tune2fs -r 131072 /dev/vda >/dev/null 2>&1
+}
+take_disk_space
 mkdir -p /data/apk-cache /data/docker /var/lib/docker
 ln -sfn /data/apk-cache /etc/apk/cache
 mount --bind /data/docker /var/lib/docker
@@ -85,7 +92,7 @@ else
   cp /etc/orbit/host-ca.pem /usr/local/share/ca-certificates/host-ca.crt
   update-ca-certificates >/dev/null 2>&1
   add_host_ca
-  resize2fs /dev/vda >/dev/null 2>&1  # first boot: e2fsprogs only now exists
+  take_disk_space  # first boot: e2fsprogs only now exists
   # Only a complete install is worth keeping; otherwise the next boot retries.
   if [ "${pkgs:-}" = ok ] && command -v dockerd >/dev/null; then
     /etc/orbit/snapshot.sh && log "saved read-only root snapshot for next boot"
