@@ -227,12 +227,8 @@ remove the shared directories themselves.
 and your machine's trusted root certificates
 ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
-To grow the data disk, stop the VM, enlarge the file, and start the VM again.
-The guest resizes its filesystem on boot:
-
-```bash
-python3 -c "import os;p=os.path.expanduser('~/.orbit/vmm/data.img');os.truncate(p,max(os.path.getsize(p),128<<30))"
-```
+To make the data disk larger than the default, set `ORBIT_DISK_GB` and run `orbit up`.
+The guest resizes its filesystem on boot. It never shrinks.
 
 ### Data disk
 
