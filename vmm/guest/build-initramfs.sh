@@ -11,7 +11,11 @@ if [ "$(uname -m)" = x86_64 ]; then
   KAPK=$(ls "$CACHE"/linux-virt-*-x86_64.apk | tail -1)
 else
   MINI=$(ls "$CACHE"/alpine-minirootfs-*-aarch64.tar.gz | tail -1)
-  KAPK=$(ls "$CACHE"/linux-virt-*.apk | grep -v -- -x86_64.apk | tail -1)
+  # The newest arm64 kernel: the x86-64 ones share the prefix.
+  KAPK=
+  for f in "$CACHE"/linux-virt-*.apk; do
+    case "$f" in *-x86_64.apk) ;; *) KAPK=$f ;; esac
+  done
 fi
 
 WORK="$(mktemp -d)"
