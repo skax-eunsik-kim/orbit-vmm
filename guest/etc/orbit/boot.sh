@@ -6,8 +6,11 @@ log() { echo "[orbit] $*" > /dev/hvc0; }
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
-# Console: hvc0 under Virtualization.framework, the PL011 (ttyAMA0) under orbit-vmm.
-[ -e /dev/hvc0 ] || ln -sf ttyAMA0 /dev/hvc0
+# Console: hvc0 under Virtualization.framework; under orbit-vmm the PL011
+# (ttyAMA0) on arm64, the 8250 (ttyS0) on x86-64.
+if [ ! -e /dev/hvc0 ]; then
+  if [ -e /dev/ttyAMA0 ]; then ln -sf ttyAMA0 /dev/hvc0; else ln -sf ttyS0 /dev/hvc0; fi
+fi
 mkdir -p /dev/pts /dev/shm
 mount -t devpts devpts /dev/pts
 mount -t tmpfs -o mode=1777 tmpfs /dev/shm
@@ -87,7 +90,10 @@ else
   grep -q '^@docker ' /etc/apk/repositories \
     || sed -n 's|^\(.*/alpine/\)v[0-9.]*/main$|@docker \1v3.23/community|p' /etc/apk/repositories | head -1 >> /etc/apk/repositories
   # Served from /data/apk-cache after the first boot, so later boots work offline.
-  apk add -q docker@docker docker-engine@docker docker-cli@docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq qemu-x86_64 > /dev/hvc0 2>&1 && pkgs=ok || log "apk add failed"
+  # qemu-x86_64 runs linux/amd64 images on an arm64 guest; an x86-64 guest runs them natively.
+  emu=; [ "$(uname -m)" = aarch64 ] && emu=qemu-x86_64
+  # shellcheck disable=SC2086 # $emu is one word or none
+  apk add -q docker@docker docker-engine@docker docker-cli@docker socat iptables ip6tables e2fsprogs e2fsprogs-extra setpriv dnsmasq jq $emu > /dev/hvc0 2>&1 && pkgs=ok || log "apk add failed"
   # ca-certificates (pulled in by docker) regenerates the bundle; persist the host roots through it.
   cp /etc/orbit/host-ca.pem /usr/local/share/ca-certificates/host-ca.crt
   update-ca-certificates >/dev/null 2>&1

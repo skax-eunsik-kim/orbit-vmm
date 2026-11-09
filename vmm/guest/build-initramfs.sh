@@ -6,8 +6,13 @@ set -euo pipefail
 NAME=$1 OUT=$2
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CACHE="${ORBIT_HOME:-$HOME/.orbit}/cache"
-MINI=$(ls "$CACHE"/alpine-minirootfs-*-aarch64.tar.gz | tail -1)
-KAPK=$(ls "$CACHE"/linux-virt-*.apk | tail -1)
+if [ "$(uname -m)" = x86_64 ]; then
+  MINI=$(ls "$CACHE"/alpine-minirootfs-*-x86_64.tar.gz | tail -1)
+  KAPK=$(ls "$CACHE"/linux-virt-*-x86_64.apk | tail -1)
+else
+  MINI=$(ls "$CACHE"/alpine-minirootfs-*-aarch64.tar.gz | tail -1)
+  KAPK=$(ls "$CACHE"/linux-virt-*.apk | grep -v -- -x86_64.apk | tail -1)
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
