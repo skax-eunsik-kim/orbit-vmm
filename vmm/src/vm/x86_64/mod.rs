@@ -30,9 +30,11 @@ pub mod layout {
     pub const LOW_RAM_MAX: u64 = 0xc000_0000;
     pub const HIGH_RAM_BASE: u64 = 0x1_0000_0000;
     /// virtio-mmio slot i at VIRTIO_BASE + i * VIRTIO_STRIDE, IOAPIC pin VIRTIO_IRQ_BASE + i.
+    /// Pins 16-23 are past the ISA IRQs, which Linux's legacy drivers claim
+    /// by number (rtc_cmos takes IRQ 8 for our CMOS clock, the 8250 IRQ 4).
     pub const VIRTIO_BASE: u64 = 0xd000_0000;
     pub const VIRTIO_STRIDE: u64 = 0x200;
-    pub const VIRTIO_IRQ_BASE: u32 = 5;
+    pub const VIRTIO_IRQ_BASE: u32 = 16;
     pub const IOAPIC_BASE: u64 = 0xfec0_0000;
     pub const LAPIC_BASE: u64 = 0xfee0_0000;
     /// Local APIC timer clock. 1 GHz gives Linux's clockevent (bus / 16) a
@@ -154,12 +156,12 @@ mod tests {
     fn announces_virtio_windows_on_the_command_line() {
         let mut bus = MmioBus::default();
         for (base, irq, kind) in
-            [(layout::IOAPIC_BASE, None, DeviceKind::IoApic), (layout::VIRTIO_BASE, Some(5), DeviceKind::VirtioMmio)]
+            [(layout::IOAPIC_BASE, None, DeviceKind::IoApic), (layout::VIRTIO_BASE, Some(16), DeviceKind::VirtioMmio)]
         {
             bus.add(MmioRegion { base, size: 0x200, irq, kind, device: Arc::new(Nop) });
         }
         let s = machine_cmdline(&bus);
-        assert!(s.ends_with(" virtio_mmio.device=0x200@0xd0000000:5"), "{s}");
+        assert!(s.ends_with(" virtio_mmio.device=0x200@0xd0000000:16"), "{s}");
         assert_eq!(s.matches("virtio_mmio.device").count(), 1);
     }
 }
