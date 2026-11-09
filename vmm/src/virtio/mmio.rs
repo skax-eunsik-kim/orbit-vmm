@@ -62,6 +62,11 @@ impl Interrupt {
         let left = self.status.fetch_and(!bits, Ordering::SeqCst) & !bits;
         if left == 0 {
             self.irq.set_level(false);
+        } else {
+            // Bits the driver hadn't seen yet. A level line is still high and
+            // this is a no-op; an edge line (x86-64 IOAPIC) needs a new edge, or
+            // the driver, which only handles the bits it read, never sees them.
+            self.irq.set_level(true);
         }
     }
 }
