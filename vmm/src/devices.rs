@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-/// A level-triggered interrupt line into the guest's GIC (an SPI).
-/// Implemented by the core on top of `hv_gic_set_spi`.
+/// A level-triggered interrupt line into the guest's interrupt controller:
+/// a GIC SPI (`hv_gic_set_spi`) on arm64, an IOAPIC pin on x86-64.
 pub trait IrqLine: Send + Sync {
     fn set_level(&self, high: bool);
 }
@@ -15,37 +15,32 @@ pub trait MmioDevice: Send + Sync {
     fn write(&self, offset: u64, data: &[u8]);
 }
 
-/// How the device appears in the device tree.
+/// What the device is, which decides how the guest learns about it (device
+/// tree node on arm64, kernel command line or MP table on x86-64).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeviceKind {
     /// ARM PL011 UART ("arm,pl011"), used as the kernel console (ttyAMA0).
+    #[cfg(target_arch = "aarch64")]
     Pl011,
     /// virtio-mmio transport ("virtio,mmio"), any virtio device behind it.
     VirtioMmio,
+    /// x86 I/O APIC (described by the MP table).
+    #[cfg(target_arch = "x86_64")]
+    IoApic,
 }
 
 pub struct MmioRegion {
     pub base: u64,
     pub size: u64,
-    /// GIC SPI number (0-based, i.e. INTID - 32), or None.
-    pub spi: Option<u32>,
+    /// Interrupt line, or None: GIC SPI number (0-based, i.e. INTID - 32)
+    /// on arm64, IOAPIC pin on x86-64.
+    pub irq: Option<u32>,
     pub kind: DeviceKind,
     pub device: Arc<dyn MmioDevice>,
 }
 
-/// Fixed guest-physical layout. RAM starts at memory::RAM_BASE (0x8000_0000).
-pub mod layout {
-    pub const GIC_DIST_BASE: u64 = 0x0800_0000; // 64 KiB
-    pub const GIC_REDIST_BASE: u64 = 0x080a_0000; // 128 KiB per vCPU
-    pub const UART_BASE: u64 = 0x0900_0000;
-    pub const UART_SPI: u32 = 1;
-    /// virtio-mmio slot i lives at VIRTIO_BASE + i * VIRTIO_STRIDE, SPI VIRTIO_SPI_BASE + i.
-    pub const VIRTIO_BASE: u64 = 0x0a00_0000;
-    pub const VIRTIO_STRIDE: u64 = 0x200;
-    pub const VIRTIO_SPI_BASE: u32 = 16;
-}
-
-/// The MMIO bus the vCPU loop dispatches data aborts to.
+/// The MMIO bus the vCPU loop dispatches guest device accesses to (data
+/// aborts on arm64, EPT violations on x86-64).
 #[derive(Default)]
 pub struct MmioBus {
     pub regions: Vec<MmioRegion>,

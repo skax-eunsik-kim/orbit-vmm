@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use super::hvf::{self, hv, HvResult};
+use super::layout;
 use super::vcpu::Kicker;
-use crate::devices::{layout, IrqLine};
+use crate::devices::IrqLine;
 
 /// Guest-physical placement of the GIC, as created.
 #[derive(Clone, Copy, Debug)]

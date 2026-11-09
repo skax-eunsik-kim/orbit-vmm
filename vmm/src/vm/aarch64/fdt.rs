@@ -132,7 +132,7 @@ pub fn build(p: &FdtParams) -> Result<Vec<u8>, FdtError> {
                 let n = f.begin_node(&format!("pl011@{:x}", r.base))?;
                 f.property_string_list("compatible", vec!["arm,pl011".into(), "arm,primecell".into()])?;
                 f.property_array_u64("reg", &[r.base, r.size])?;
-                if let Some(spi) = r.spi {
+                if let Some(spi) = r.irq {
                     f.property_array_u32("interrupts", &[GIC_FDT_IRQ_TYPE_SPI, spi, IRQ_TYPE_LEVEL_HIGH])?;
                 }
                 f.property_array_u32("clocks", &[PHANDLE_APB_PCLK, PHANDLE_APB_PCLK])?;
@@ -143,7 +143,7 @@ pub fn build(p: &FdtParams) -> Result<Vec<u8>, FdtError> {
                 let n = f.begin_node(&format!("virtio_mmio@{:x}", r.base))?;
                 f.property_string("compatible", "virtio,mmio")?;
                 f.property_array_u64("reg", &[r.base, r.size])?;
-                if let Some(spi) = r.spi {
+                if let Some(spi) = r.irq {
                     // Level-high: the transport holds the line while InterruptStatus != 0.
                     f.property_array_u32("interrupts", &[GIC_FDT_IRQ_TYPE_SPI, spi, IRQ_TYPE_LEVEL_HIGH])?;
                 }

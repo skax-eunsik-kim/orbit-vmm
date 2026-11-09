@@ -126,3 +126,8 @@ macro_rules! hv {
     }};
 }
 pub(crate) use hv;
+
+/// hv_vm_create with the default configuration.
+pub fn vm_create() -> HvResult {
+    hv!(hv_vm_create(std::ptr::null_mut()))
+}
