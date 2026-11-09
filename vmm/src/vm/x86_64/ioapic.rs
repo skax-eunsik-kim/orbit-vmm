@@ -14,6 +14,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use super::idle::Kicker;
 use crate::devices::{IrqLine, MmioDevice};
 
 pub const PINS: usize = 24;
@@ -28,13 +29,15 @@ pub trait Deliver: Send + Sync {
     fn deliver(&self, entry: u64);
 }
 
-pub struct HvDeliver;
+/// Sends to the in-kernel local APICs and wakes vCPUs parked in HLT.
+pub struct HvDeliver(pub Arc<Kicker>);
 
 impl Deliver for HvDeliver {
     fn deliver(&self, entry: u64) {
         if let Err(e) = super::hvf::hv!(hv_vm_send_ioapic_intr(entry)) {
             eprintln!("orbit-vmm: {e} (entry 0x{entry:x})");
         }
+        self.0.kick();
     }
 }
 

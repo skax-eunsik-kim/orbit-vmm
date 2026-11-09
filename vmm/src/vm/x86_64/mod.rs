@@ -8,6 +8,7 @@ mod boot;
 mod cpuid;
 mod decode;
 pub mod hvf;
+mod idle;
 mod ioapic;
 mod mptable;
 mod rtc;
@@ -90,7 +91,8 @@ pub fn setup_and_run(config: Config) -> Result<i32, String> {
     crate::memdump::spawn(mem.clone());
     crate::pressure::spawn(&config);
 
-    let ioapic = Arc::new(ioapic::IoApic::new(config.cpus, Box::new(ioapic::HvDeliver)));
+    let kicker = Arc::new(idle::Kicker::new());
+    let ioapic = Arc::new(ioapic::IoApic::new(config.cpus, Box::new(ioapic::HvDeliver(kicker.clone()))));
     let line = |pin: u32| -> Arc<dyn crate::devices::IrqLine> { Arc::new(ioapic::Line::new(ioapic.clone(), pin)) };
     let serial = serial::Serial::new(line(serial::IRQ));
 
@@ -134,7 +136,7 @@ pub fn setup_and_run(config: Config) -> Result<i32, String> {
     let table = mptable::build(config.cpus, layout::IOAPIC_BASE as u32, ioapic::PINS as u8, signature, features);
     mptable::write(&mem, &table)?;
 
-    let machine = Arc::new(vcpu::Machine::new(Arc::new(bus), mem, serial, tsc_hz, config.cpus, kernel.entry));
+    let machine = Arc::new(vcpu::Machine::new(Arc::new(bus), mem, serial, kicker, tsc_hz, config.cpus, kernel.entry));
     Ok(vcpu::run_all(machine))
 }
 

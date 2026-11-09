@@ -1,7 +1,7 @@
 //! vCPU threads: VMCS setup, the hv_vcpu_run_until loop, and the exits the
 //! kernel leaves to us: CPUID, MSRs, control registers, port I/O, device MMIO
 //! (EPT violations, decoded with decode.rs), local APIC accesses (forwarded
-//! to the in-kernel APIC), INIT/SIPI and halt.
+//! to the in-kernel APIC), INIT/SIPI, and HLT (idle.rs).
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use super::decode::{self, Access};
 use super::hvf::{self, hv, hv_vcpuid_t};
+use super::idle::{self, Kicker};
 use super::{boot, cpuid, layout, rtc, serial};
 use crate::devices::MmioBus;
 use crate::memory::GuestMemory;
@@ -89,6 +90,7 @@ pub struct Machine {
     pub mem: Arc<GuestMemory>,
     serial: serial::Serial,
     rtc: rtc::Rtc,
+    kicker: Arc<Kicker>,
     tsc_hz: u64,
     slots: Vec<Slot>,
     /// hv_vcpuid_t of each vCPU, by index (None until created).
@@ -103,6 +105,7 @@ impl Machine {
         bus: Arc<MmioBus>,
         mem: Arc<GuestMemory>,
         serial: serial::Serial,
+        kicker: Arc<Kicker>,
         tsc_hz: u64,
         cpus: u32,
         entry: u64,
@@ -114,6 +117,7 @@ impl Machine {
             mem,
             serial,
             rtc: rtc::Rtc::default(),
+            kicker,
             tsc_hz,
             slots,
             ids: Mutex::new(vec![None; cpus as usize]),
@@ -140,6 +144,7 @@ impl Machine {
             let _g = slot.start.lock().unwrap();
             slot.cond.notify_all();
         }
+        self.kicker.kick();
         self.kick(|_| true);
     }
 
@@ -152,9 +157,9 @@ impl Machine {
     }
 
     /// Without ACPI, Linux "powers off" by halting every CPU with interrupts
-    /// disabled, and the in-kernel APIC keeps a halted vCPU inside
-    /// hv_vcpu_run_until. So once a second each vCPU is made to exit and
-    /// reports whether it is in that state; when all are, the guest is off.
+    /// disabled. A vCPU notices it is halted only when it exits, so once a
+    /// second the running ones are made to exit (`idle_until_interrupt` then
+    /// records the state); when every vCPU is in it, the guest is off.
     fn watch_for_halt(self: &Arc<Self>) {
         let m = self.clone();
         std::thread::Builder::new()
@@ -523,9 +528,9 @@ fn run(m: &Machine, cpu: &mut Vcpu) -> Result<(), String> {
         }
         match reason {
             hvf::VMX_REASON_IRQ | hvf::VMX_REASON_IRQ_WND => {
-                let halted = cpu.vmcs(hvf::VMCS_GUEST_ACTIVITY_STATE) == ACTIVITY_HLT
-                    && cpu.vmcs(hvf::VMCS_GUEST_RFLAGS) & RFLAGS_IF == 0;
-                m.slots[cpu.index].dead.store(halted, Ordering::SeqCst);
+                if cpu.vmcs(hvf::VMCS_GUEST_ACTIVITY_STATE) == ACTIVITY_HLT {
+                    idle_until_interrupt(m, cpu);
+                }
             }
             hvf::VMX_REASON_EXC_NMI => {}
             hvf::VMX_REASON_TRIPLE_FAULT => {
@@ -616,6 +621,52 @@ fn run(m: &Machine, cpu: &mut Vcpu) -> Result<(), String> {
                 ))
             }
         }
+    }
+}
+
+fn apic_reg(cpu: &Vcpu, offset: u32) -> u32 {
+    let mut v = 0;
+    let _ = hv!(hv_vcpu_apic_read(cpu.id, offset, &mut v));
+    v
+}
+
+/// The guest halted (Linux's idle loop): sleep until an interrupt is pending
+/// in this vCPU's local APIC or its timer is due, instead of letting the
+/// kernel keep the core in a guest HLT.
+fn idle_until_interrupt(m: &Machine, cpu: &Vcpu) {
+    let slot = &m.slots[cpu.index];
+    // HLT with interrupts off only ends with NMI or INIT: Linux's halt and
+    // poweroff end state. Sleep until the machine stops.
+    let dead = cpu.vmcs(hvf::VMCS_GUEST_RFLAGS) & RFLAGS_IF == 0;
+    slot.dead.store(dead, Ordering::SeqCst);
+    if dead {
+        while !m.stopped() {
+            let seen = m.kicker.generation();
+            m.kicker.park(seen, Duration::from_secs(1));
+        }
+        return;
+    }
+    // Re-enter at least this often even with no timer armed.
+    let start = std::time::Instant::now();
+    let mut deadline = start + Duration::from_millis(100);
+    if let Some(t) = idle::timer_remaining(
+        apic_reg(cpu, idle::APIC_LVT_TIMER),
+        apic_reg(cpu, idle::APIC_TIMER_CURRENT),
+        apic_reg(cpu, idle::APIC_TIMER_DIVIDE),
+        layout::APIC_BUS_HZ,
+    ) {
+        deadline = deadline.min(start + t);
+    }
+    loop {
+        let seen = m.kicker.generation();
+        if m.stopped() || (0..8).any(|i| apic_reg(cpu, idle::APIC_IRR + 0x10 * i) != 0) {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return;
+        }
+        m.kicker.park(seen, deadline - now);
     }
 }
 
@@ -790,6 +841,9 @@ fn apic_write(m: &Machine, cpu: &Vcpu, offset: u32, value: u32) -> bool {
     if let Err(e) = hv!(hv_vcpu_apic_write(cpu.id, offset, value, &mut no_side_effect)) {
         eprintln!("orbit-vmm: vcpu{}: APIC write 0x{offset:x}: {e}", cpu.index);
         return true;
+    }
+    if offset == idle::APIC_ICR_LOW {
+        m.kicker.kick(); // an IPI: the target may be parked in idle_until_interrupt
     }
     if no_side_effect {
         return true;
