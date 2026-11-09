@@ -1,6 +1,6 @@
 //! CPUID as the guest sees it: the host's answers, minus what this VMM does
 //! not virtualize (VMX, performance counters, MONITOR/MWAIT, TSC-deadline,
-//! x2APIC, SGX, PT, speculation-control MSRs), plus a topology of `cpus`
+//! x2APIC, SGX, PT, ARCH_CAPABILITIES), plus a topology of `cpus`
 //! single-threaded cores and the TSC/APIC-timer frequencies in leaf 0x15, so
 //! Linux needs neither a PIT nor an HPET to calibrate.
 
@@ -67,9 +67,10 @@ pub fn filter(leaf: u32, subleaf: u32, host: [u32; 4], c: &Ctx) -> [u32; 4] {
             }
             // ECX: drop WAITPKG, PKU/OSPKE, LA57, SGX-LC.
             cx &= !bits(&[3, 4, 5, 16, 30]);
-            // EDX: drop what needs MSRs we don't pass through (IBRS/IBPB, STIBP,
-            // L1D_FLUSH, ARCH_CAPABILITIES, SSBD). MD_CLEAR stays: VERW needs no MSR.
-            d &= !bits(&[26, 27, 28, 29, 31]);
+            // EDX: SPEC_CTRL, PRED_CMD and FLUSH_CMD are native MSRs (vcpu.rs),
+            // so IBRS/IBPB, STIBP, L1D_FLUSH and SSBD stay; ARCH_CAPABILITIES
+            // would need the host's value, so it goes.
+            d &= !(1 << 29);
         }
         7 => [a, b, cx, d] = [0; 4],
         0xb => {

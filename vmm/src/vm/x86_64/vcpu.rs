@@ -53,7 +53,7 @@ const GPRS: [u32; 16] = [
 ];
 
 /// The guest's MSRs that hardware or the kernel can't hold for us.
-const NATIVE_MSRS: [u32; 12] = [
+const NATIVE_MSRS: [u32; 15] = [
     0xc000_0081, // STAR
     0xc000_0082, // LSTAR
     0xc000_0083, // CSTAR
@@ -66,6 +66,11 @@ const NATIVE_MSRS: [u32; 12] = [
     0x0000_0174, // SYSENTER_CS
     0x0000_0175, // SYSENTER_ESP
     0x0000_0176, // SYSENTER_EIP
+    // Speculation controls, so the guest can use IBRS/IBPB/STIBP/SSBD and
+    // L1D flushes against its own processes (cpuid.rs offers them).
+    0x0000_0048, // SPEC_CTRL
+    0x0000_0049, // PRED_CMD
+    0x0000_010b, // FLUSH_CMD
 ];
 
 enum Start {
