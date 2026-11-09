@@ -9,7 +9,8 @@
  vmm-up.sh  ── control.sock ┤   vsock        ├─ control.sh  (ports, clock, pressure, shutdown)
  FSEvents   ── fsnotify     ┘ ─────────────  └─ fsnotify.sh (Mac edits → inotify)
                          orbit-vmm
-   vCPU threads ─ Hypervisor.framework ─ in-kernel GICv3, PSCI, PL011
+   vCPU threads ─ Hypervisor.framework ─ in-kernel GICv3, PSCI, PL011 (Apple Silicon)
+                                       └ in-kernel LAPIC + IOAPIC, MP table, 8250 (Intel)
    virtio-mmio:  blk  ─ data.img (ext4, flock'd: one VM per disk; discard)
                  net  ─ libslirp (NAT, DNS, runtime port forwards)
                  vsock ─ Unix sockets on the Mac
@@ -21,15 +22,63 @@
 
 ## VMM (`vmm/`)
 
-The VMM is one Rust process. `src/vm/` has the machine itself:
+The VMM is one Rust process. `src/vm/` has the machine itself, one per
+architecture, picked at compile time. On Apple Silicon (`src/vm/aarch64/`):
 
 - Hypervisor.framework FFI (`hvf.rs`) and the in-kernel GIC (`gic.rs`).
 - Boot and the device tree (`boot.rs`, `fdt.rs`).
 - The PL011 console (`pl011.rs`).
 - vCPU threads, PSCI and MMIO decoding (`vcpu.rs`).
 
+On Intel (`src/vm/x86_64/`, see [Intel Macs](#intel-macs-x86-64) below):
+
+- Hypervisor.framework VMX FFI (`hvf.rs`), CPUID (`cpuid.rs`).
+- Linux 64-bit boot and the MP table (`boot.rs`, `mptable.rs`).
+- The IOAPIC (`ioapic.rs`), 8250 console (`serial.rs`) and CMOS clock (`rtc.rs`).
+- vCPU threads, INIT/SIPI, MMIO instruction decoding and idle (`vcpu.rs`,
+  `decode.rs`, `idle.rs`).
+
 `src/virtio/` has the virtio-mmio v2 transport and split virtqueues, plus one
 file per device.
+
+### Intel Macs (x86-64)
+
+The guest is the same Alpine `linux-virt`, built for x86-64; devices are the
+same virtio-mmio devices. What differs is the machine around them:
+
+- **Interrupts.** Local APICs run in the kernel (`HV_VM_ACCEL_APIC`, macOS
+  12+): APIC timer, IPIs and EOIs. The guest's xAPIC accesses exit to the VMM,
+  which decodes the instruction and forwards it (`hv_vcpu_apic_read/write`);
+  INIT/SIPI come back as exits and start the other vCPUs in real mode. The
+  IOAPIC is emulated in the VMM, edge-triggered only, and delivers with
+  `hv_vm_send_ioapic_intr`: the in-kernel IOAPIC was reported to lose
+  level-triggered interrupts (Apple developer forums thread 760565).
+  virtio-mmio raises a new edge whenever an acknowledgement leaves status bits
+  set, so the driver never misses one.
+- **No firmware tables but an MP table.** There is no ACPI, PCI, PIT, HPET or
+  8259: an MP table lists the CPUs and the IOAPIC, CPUID leaf 0x15 gives the TSC
+  and APIC timer rates (so Linux calibrates nothing), and the kernel command
+  line gets `virtio_mmio.device=` for each device plus `pci=off acpi=off
+  tsc=reliable reboot=k`.
+- **Memory layout.** RAM starts at 0 and stops at 3 GiB; the rest continues
+  at 4 GiB, above the hole for virtio-mmio (0xd000_0000), the IOAPIC and the
+  local APIC. Both ranges come from one `hv_vm_allocate` block, so returning
+  memory works as above (on 4 KiB host pages).
+- **Device access.** Guest MMIO arrives as EPT violations. `decode.rs`
+  decodes the `mov`/`movzx`/`movsx` forms Linux's `readX`/`writeX` compile to.
+- **Idle.** The kernel runs a guest `HLT` inside VMX and keeps the core: an
+  idle 4-vCPU guest used 395% CPU. When an exit finds the guest halted, the
+  vCPU thread sleeps until its local APIC has an interrupt pending, its APIC
+  timer is due (from the APIC's current count), or an IOAPIC interrupt or IPI
+  (both pass through the VMM) wakes it. Idle 4 vCPUs then used 8–15%.
+- **Power off.** Without ACPI, Linux's `poweroff` halts every CPU with
+  interrupts off. Once a second each vCPU is made to exit; when all are in
+  that state, the VMM exits with status 0. `reboot` and panics reset through
+  the i8042 port (status 3).
+- **CPUID** hides what isn't virtualized: VMX, PMU, MONITOR/MWAIT, x2APIC,
+  TSC-deadline and `ARCH_CAPABILITIES`. The speculation-control MSRs
+  (`SPEC_CTRL`, `PRED_CMD`, `FLUSH_CMD`) are passed through, so the guest
+  protects its own processes with IBRS/IBPB/STIBP/SSBD.
 
 `signals.rs` handles SIGTERM and SIGINT sent to the VMM itself: it logs the
 sender's pid and name to `console.log`, asks the guest to power off (30 s at
@@ -90,7 +139,8 @@ footprint then grows past the guest pages the VMM actually holds (by about
 a third to a half of the compressed amount in measurements; it is near zero
 when nothing is compressed). To see which guest pages are held, start the VMM
 with `ORBIT_MEMDUMP=<prefix>`, `touch <prefix>.req`, and match `<prefix>.bin`
-(one `mincore` byte per 16 KiB page of guest RAM) against the guest's
+(one `mincore` byte per host page of guest RAM: 16 KiB on Apple Silicon, 4 KiB
+on Intel) against the guest's
 `/proc/kpageflags` with `vmm/bench/memxref.py`.
 
 ### Data disk (virtio-blk)

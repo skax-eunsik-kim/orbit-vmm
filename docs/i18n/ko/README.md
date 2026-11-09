@@ -7,7 +7,7 @@
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
 
-Apple Silicon Mac 용으로 메모리를 아껴 쓰는 Docker 엔진입니다.
+Apple Silicon Mac(그리고 새로 추가되어 시험이 덜 된 Intel Mac)용으로 메모리를 아껴 쓰는 Docker 엔진입니다.
 
 orbit-vmm 은 Apple Hypervisor.framework 위에 Rust 로 만든 작은 가상 머신 모니터입니다.
 Docker 가 도는 Alpine Linux 게스트를 띄우고, Mac 의 `docker` / `docker compose` CLI 가
@@ -42,7 +42,8 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
   - `host.docker.internal` 과 `host-gateway` 가 Mac 을 가리킵니다.
   - 컨테이너가 Mac 이 신뢰하는 루트 CA 를 신뢰하므로, TLS 검사 프록시 뒤에서도
     `pip`, `npm`, `apk`, `curl` 이 됩니다.
-- **amd64 이미지**는 qemu 사용자 모드 에뮬레이션(binfmt)으로 돕니다.
+- **amd64 이미지**는 Apple Silicon 에서는 qemu 사용자 모드 에뮬레이션(binfmt)으로,
+  Intel 에서는 그대로 돕니다.
 - **VM 여러 개를 나란히** `ORBIT_INSTANCE=<이름>` 으로 띄울 수 있습니다.
 - **작고 검토하기 쉽습니다.** Rust 바이너리 하나, 코드 약 6,300줄입니다. 의존성은 `libc`,
   `vm-fdt`, libslirp 뿐입니다.
@@ -52,6 +53,9 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
 - Apple Silicon Mac, macOS 15 이상(커널 내장 GIC API 가 15 이상을 요구합니다).
   지금까지 macOS 26.4 에서만 시험했습니다. 다른 버전에서는 먼저 아래 검사를
   돌리세요.
+- 또는 VT-x 가 있는 Intel Mac, macOS 12 이상(커널 내장 local APIC API 가 12 이상을
+  요구합니다). Core i7-9750H, macOS 26.5.1 에서만 시험했습니다. 다른 점은
+  [Intel Mac](#intel-mac)을 보세요.
 - Xcode Command Line Tools(`xcode-select --install`)와
   [Homebrew](https://brew.sh).
 - Rust 1.87 이상과 libslirp: `brew install rust libslirp`.
@@ -95,6 +99,31 @@ orbit-vmm 은 메모리를 돌려줍니다. 게스트가 해제한 페이지를 
    `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` 로 VMM 이 게스트가 쓰는 만큼만 들고 있는
    것이 확인되면 누수가 아니라 macOS 가 세는 방식이 바뀐 것입니다
    ([docs/architecture.md](architecture.md) 참고).
+
+### Intel Mac
+
+Intel Mac 에서도 같은 명령으로 x86-64 게스트를 빌드하고 띄웁니다. `make guest` 가
+x86-64 용 Alpine 커널과 루트 파일시스템을 받고, VMM 은 Apple Silicon 머신 대신
+VT-x 를 씁니다([구조, 영어](../../architecture.md#intel-macs-x86-64)). 지금까지 Mac 한 대(Core
+i7-9750H, 6코어 12스레드, 16 GB, macOS 26.5.1)에서만 시험했습니다.
+
+- **메모리 반환은 Apple Silicon 과 같이 동작합니다**(4 KiB 페이지 단위).
+  `--reclaim-selftest` 에서 VMM 이 쓰는 방법이 `released 1 MiB` 를 냅니다. 시험
+  게스트(`vmm/guest/init-memtest`, 1 GiB, vCPU 2개)는 유휴 275 MiB 에서 600 MiB 를
+  잡았을 때 866 MiB 가 되었고, 해제하고 몇 초 뒤 284 MiB 로 돌아왔습니다. 게스트 RAM
+  8 GiB 에서는 483 → 1,070 → 554 MiB 였습니다. `bench/memtest.sh`(컨테이너가 익명
+  메모리 1.5 GB 와 페이지 캐시 2 GB 를 잡음, VM 4 GiB·vCPU 4개)는 유휴 970 MiB,
+  최고 2,762 MiB, 컨테이너 종료 30초 뒤 980 MiB 였습니다.
+- **검사:** `make devflow` 29개 통과, 0개 실패(앞선 한 번은 `host.docker.internal`
+  시간 초과 1건이 있었고 다시 나오지 않음), `vmm/bench/fssec.sh` 23/23.
+- **유휴 CPU:** 유휴 상태의 vCPU 4개 게스트가 코어 하나의 8–27% 를 씁니다(`ps`,
+  3초 간격. 높은 쪽은 Mac 이 바쁠 때 잰 값).
+- **macOS 26 의 Homebrew 에는 Intel 용 미리 빌드된 패키지가 없어서**
+  `brew install libslirp` 가 libslirp 와 의존성(glib, Python, CMake 등)을 소스에서
+  빌드합니다. 위 Mac 에서 몇 시간이 걸렸습니다. Rust 는 `brew install rust` 대신
+  [rustup](https://rustup.rs)으로 설치하세요.
+- **amd64 이미지는 그대로 돕니다.** arm64 전용 이미지는 돌지 않습니다(게스트에
+  qemu-aarch64 가 없습니다).
 
 ## 빠른 시작
 
@@ -372,6 +401,12 @@ bind mount, inotify, 게스트 시계를 확인하고, VMM 의 메모리·스레
 - **Kubernetes:** kind(`orbit k8s`)로만 쓸 수 있고 기본은 단일 노드입니다.
   `LoadBalancer` 서비스와 직접 쓴 kind 설정의 `extraPortMappings` 는 대신 설정해 주지
   않습니다.
+- **Intel Mac** 지원은 새로 추가되었고 Mac 한 대에서만 시험했습니다. 게스트에는 ACPI
+  와 PCI 가 없어서, 게스트의 `poweroff` 는 모든 vCPU 가 인터럽트를 끈 채 멈춘 것을
+  보고 1초 안에 알아챕니다. 게스트 커널(6.18.62)은 부팅 중 투기 실행 대응을 적용하며
+  "CPA detected W^X violation" 경고를 한 번 남기고 계속 진행합니다. Linux 는 local
+  APIC 와 장치에 VMM 이 해석하는 명령어로 접근하므로 접근마다 VM exit 이 한 번
+  생깁니다.
 - **빠진 것:** GUI 가 없고, 서명된 바이너리 릴리스도 없습니다. 직접 빌드해야 합니다.
 
 ## 동작 방식

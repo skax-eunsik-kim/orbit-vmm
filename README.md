@@ -5,7 +5,8 @@
 [![CI](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml/badge.svg)](https://github.com/skax-eunsik-kim/orbit-vmm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-A memory-frugal Docker engine for Apple Silicon Macs.
+A memory-frugal Docker engine for Apple Silicon Macs (and, newer and less
+tested, Intel Macs).
 
 orbit-vmm is a small virtual machine monitor written in Rust on Apple's
 Hypervisor.framework. It boots an Alpine Linux guest that runs Docker, and the
@@ -43,7 +44,8 @@ can actually be returned.
   - `host.docker.internal` and `host-gateway` resolve to the Mac.
   - Containers trust the root CAs your Mac trusts, so `pip`, `npm`, `apk` and
     `curl` work behind TLS-inspecting proxies.
-- **amd64 images** run via qemu user emulation (binfmt).
+- **amd64 images** run via qemu user emulation (binfmt) on Apple Silicon, and
+  natively on Intel.
 - **Several VMs side by side** with `ORBIT_INSTANCE=<name>`.
 - **Small and auditable.** One Rust binary of about 6.3k lines of code. It depends on
   `libc`, `vm-fdt` and libslirp, and nothing else.
@@ -53,6 +55,9 @@ can actually be returned.
 - Apple Silicon Mac, macOS 15 or later (the in-kernel GIC API needs 15+).
   Only macOS 26.4 has been tested so far; on another version, run the checks
   below first.
+- Or an Intel Mac with VT-x, macOS 12 or later (the in-kernel local APIC API
+  needs 12+). Tested only on a Core i7-9750H with macOS 26.5.1; see
+  [Intel Macs](#intel-macs) for what differs.
 - Xcode Command Line Tools (`xcode-select --install`) and
   [Homebrew](https://brew.sh).
 - Rust 1.87+ and libslirp: `brew install rust libslirp`.
@@ -99,6 +104,34 @@ these three things on a new version before relying on it:
    version is a change in how macOS counts, not a leak, as long as
    `ORBIT_MEMDUMP` + `vmm/bench/memxref.py` show the VMM holding about what
    the guest uses (see [docs/architecture.md](docs/architecture.md)).
+
+### Intel Macs
+
+The same commands build and run an x86-64 guest on an Intel Mac: `make guest`
+fetches the x86-64 Alpine kernel and root filesystem, and the VMM uses VT-x
+instead of the Apple Silicon machine ([architecture](docs/architecture.md#intel-macs-x86-64)).
+So far it has been tried on one Mac only (Core i7-9750H, 6 cores / 12
+threads, 16 GB, macOS 26.5.1):
+
+- **Memory release works as on Apple Silicon**, on 4 KiB pages:
+  `--reclaim-selftest` gives `released 1 MiB` for the method the VMM uses. A
+  test guest (`vmm/guest/init-memtest`, 1 GiB, 2 vCPUs) went from 275 MiB idle
+  to 866 MiB holding 600 MiB and back to 284 MiB a few seconds after freeing
+  it; with 8 GiB of guest RAM, 483 → 1,070 → 554 MiB. `bench/memtest.sh`
+  (a container holding 1.5 GB of anonymous memory and 2 GB of page cache; VM
+  with 4 GiB and 4 vCPUs) measured 970 MiB idle, 2,762 MiB at the peak, and
+  980 MiB 30 s after the container exited.
+- **Checks:** `make devflow` 29 pass, 0 fail (one earlier run had one
+  `host.docker.internal` timeout that didn't recur), `vmm/bench/fssec.sh`
+  23/23.
+- **Idle CPU:** an idle 4-vCPU guest uses 8–27% of one core (`ps`, 3 s
+  samples; the higher end was measured while the Mac was busy).
+- **Homebrew on macOS 26 has no ready-made Intel packages**, so
+  `brew install libslirp` builds it and its dependencies (glib, Python,
+  CMake, ...) from source; on the Mac above that took several hours.
+  Install Rust with [rustup](https://rustup.rs) rather than `brew install rust`.
+- **amd64 images run natively.** arm64-only images don't run (no qemu-aarch64
+  in the guest).
 
 ## Quick start
 
@@ -426,6 +459,12 @@ every 2 h, then every 4 h. Any problem resets it to hourly. To remove it, run
 - **Kubernetes:** only through kind (`orbit k8s`), single node by default.
   `LoadBalancer` services and `extraPortMappings` from your own kind config
   are not set up for you.
+- **Intel Macs** are new and tested on one Mac. The guest has no ACPI or PCI:
+  a guest `poweroff` is noticed within a second by watching for every vCPU
+  halted with interrupts off. The guest kernel (6.18.62) logs one
+  "CPA detected W^X violation" warning at boot while applying its
+  speculation mitigations, and continues. Linux reaches the local APIC and
+  devices through instructions the VMM decodes, which costs a VM exit each.
 - **Missing pieces:** no GUI, and no signed binary release: you build it
   yourself.
 

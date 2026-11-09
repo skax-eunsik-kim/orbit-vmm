@@ -5,6 +5,14 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Intel Macs (macOS 12 or later with VT-x) can run orbit: `make guest` builds an
+  x86-64 guest and the VMM drives VT-x through Hypervisor.framework, with the
+  same Docker, file sharing, networking and memory release as on Apple Silicon.
+  amd64 images run natively there. It is new and tested on one Mac so far
+  (Core i7-9750H, macOS 26.5.1); see "Intel Macs" in the README.
+
 ## [0.2.7] - 2026-11-05
 
 ### Fixed
