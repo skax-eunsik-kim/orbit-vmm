@@ -113,8 +113,9 @@ S="$D/docker.sock"
 # Keep the previous run's console (vmm-up.sh used to overwrite it).
 [ -s "$D/console.log" ] && mv -f "$D/console.log" "$D/console.prev.log"
 G="${ORBIT_GUEST:-$HOME/.orbit/guest}"
-# The guest console: PL011 on Apple Silicon, 8250 on Intel.
-if [ "$(uname -m)" = x86_64 ]; then CONSOLE=ttyS0; else CONSOLE=ttyAMA0; fi
+# The guest console: PL011 on Apple Silicon, 8250 on Intel. Asks the Mac, not
+# the shell: under Rosetta `uname -m` says x86_64.
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then CONSOLE=ttyAMA0; else CONSOLE=ttyS0; fi
 "$VMM" --kernel "$G/kernel" --initrd "$G/initramfs" \
   --mem "${ORBIT_MEM_MIB:-8192}" --cpus "${ORBIT_CPUS:-$(sysctl -n hw.ncpu)}" --net ${NET_OPTS[@]+"${NET_OPTS[@]}"} --balloon --disk "$D/data.img" \
   --vsock "$S:2375" --vsock "$D/control.sock:1025" --vsock "$D/fsnotify.sock:1026" --share "/Users:users" "${ALLOW[@]}" \

@@ -13,7 +13,10 @@ MIRROR="${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
 # linux-virt sha256 recorded when it was pinned (Alpine publishes no
 # per-package sha256).
 BRANCH=v3.24
-case "${ORBIT_GUEST_ARCH:-$(uname -m)}" in
+# The Mac's architecture, not the shell's: under Rosetta `uname -m` says x86_64.
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then HOST_ARCH=arm64; else HOST_ARCH=$(uname -m); fi
+GUEST_ARCH=${ORBIT_GUEST_ARCH:-$HOST_ARCH}
+case "$GUEST_ARCH" in
   arm64 | aarch64)
     ARCH=aarch64
     MINIROOT=alpine-minirootfs-3.24.2-aarch64.tar.gz
@@ -30,7 +33,7 @@ case "${ORBIT_GUEST_ARCH:-$(uname -m)}" in
     KAPK_SHA256=e121b547d9b86194a641718b52ae1c3e605085c59f31525b1649a59b3d4db0c7
     KCACHE=linux-virt-$KVER-x86_64.apk
     ;;
-  *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+  *) echo "unsupported architecture: $GUEST_ARCH" >&2; exit 1 ;;
 esac
 # For the guest-pins workflow: the two pinned downloads, nothing else.
 if [ "${1:-}" = --urls ]; then

@@ -6,7 +6,8 @@ set -euo pipefail
 NAME=$1 OUT=$2
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CACHE="${ORBIT_HOME:-$HOME/.orbit}/cache"
-if [ "$(uname -m)" = x86_64 ]; then
+# The Mac's architecture: under Rosetta `uname -m` says x86_64.
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" != 1 ]; then
   MINI=$(ls "$CACHE"/alpine-minirootfs-*-x86_64.tar.gz | tail -1)
   KAPK=$(ls "$CACHE"/linux-virt-*-x86_64.apk | tail -1)
 else

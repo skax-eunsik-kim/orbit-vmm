@@ -18,6 +18,8 @@ All notable changes are listed here. The format follows
 - `make guest` works again on a Mac without a cached kernel: Alpine removed
   the pinned `linux-virt-6.18.58-r0` from its mirrors (404). Pinned to
   6.18.62-r0.
+- On an Apple Silicon Mac, a shell running under Rosetta no longer makes
+  `make guest` build an x86-64 guest that the VMM can't boot (#52).
 
 ## [0.2.7] - 2026-11-05
 
