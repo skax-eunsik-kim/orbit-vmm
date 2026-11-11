@@ -10,6 +10,9 @@ All notable changes are listed here. The format follows
 - `make guest` works again on a Mac without a cached kernel: Alpine removed
   the pinned `linux-virt-6.18.58-r0` from its mirrors (404). Pinned to
   6.18.62-r0.
+- A container can create a file that was just deleted on the Mac. Within a
+  few seconds of the delete it used to fail with "No such file or directory",
+  which also made devflow's inotify check fail now and then (#55).
 
 ## [0.2.7] - 2026-11-05
 

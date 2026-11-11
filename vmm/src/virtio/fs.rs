@@ -137,6 +137,7 @@ const MAX_NODE_PATH_BYTES: usize = 256 << 20;
 /// Longest path the guest may use below the share, like Linux's PATH_MAX.
 const MAX_PATH_BYTES: usize = 4096;
 const ENAMETOOLONG: i32 = 36;
+const ESTALE: i32 = 116;
 const MAX_DIR_CACHE_BYTES: usize = 512 << 20;
 
 /// Attribute cache lifetime in ms (ORBIT_FS_ATTR_TTL_MS, default 500). File
@@ -859,7 +860,14 @@ impl Server {
                 r.skip(4);
                 let fh = r.u64();
                 self.path(node).and_then(|p| {
-                    let attr = if flags & 1 != 0 { self.with_file(fh, hostfs::fstat)? } else { self.root.lstat(&p)? };
+                    let attr = if flags & 1 != 0 {
+                        self.with_file(fh, hostfs::fstat)?
+                    } else {
+                        // Same as OPEN: the guest still trusts its entry for a
+                        // name the Mac has removed, and ENOENT here would fail
+                        // open(O_CREAT) on it. ESTALE makes it look again.
+                        self.root.lstat(&p).map_err(|e| if e == ENOENT { ESTALE } else { e })?
+                    };
                     Ok(attr_out(&view(&self.root, &p, attr)))
                 })
             }
@@ -953,7 +961,13 @@ impl Server {
                 // relies on that to make injected events see fresh content.
                 let keep = if flags & 3 == 0 { FOPEN_KEEP_CACHE } else { 0 };
                 // OPEN never creates (that is CREATE): drop O_CREAT/O_EXCL.
-                self.path(node).and_then(|p| self.open(&p, flags & !0o300, None)).map(|fh| open_out(fh, keep))
+                // Gone from the Mac before the guest's cached entry expired:
+                // ESTALE makes the guest kernel look the name up again, so
+                // open(O_CREAT) then creates the file instead of failing.
+                self.path(node)
+                    .and_then(|p| self.open(&p, flags & !0o300, None))
+                    .map(|fh| open_out(fh, keep))
+                    .map_err(|e| if e == ENOENT { ESTALE } else { e })
             }
             FUSE_CREATE => {
                 let flags = r.u32();
@@ -1877,6 +1891,32 @@ mod tests {
     use super::*;
     use crate::fsevents::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn a_name_deleted_on_the_mac_makes_the_guest_look_again() {
+        let share = std::env::temp_dir().join(format!("orbit-fs-test-{}", std::process::id()));
+        let w = share.join("w");
+        std::fs::create_dir_all(&w).unwrap();
+        let share = share.canonicalize().unwrap();
+        let w = w.canonicalize().unwrap();
+        std::fs::write(w.join("event"), b"x").unwrap();
+        let server = Server::new(Root::open(&share, std::slice::from_ref(&w)).unwrap());
+        let caller = (0, 0);
+        let lookup = |node: u64, name: &str| {
+            let mut b = name.as_bytes().to_vec();
+            b.push(0);
+            let out = server.handle(FUSE_LOOKUP, node, caller, &b, &[]).unwrap().unwrap();
+            u64::from_le_bytes(out[..8].try_into().unwrap())
+        };
+        let file = lookup(lookup(ROOT, "w"), "event");
+        std::fs::remove_file(w.join("event")).unwrap();
+        let open = [libc::O_WRONLY as u32, 0].map(u32::to_le_bytes).concat();
+        let opened = server.handle(FUSE_OPEN, file, caller, &open, &[]).unwrap();
+        let getattr = [0u8; 16];
+        let stat = server.handle(FUSE_GETATTR, file, caller, &getattr, &[]).unwrap();
+        std::fs::remove_dir_all(&share).unwrap();
+        assert_eq!((opened.err(), stat.err()), (Some(ESTALE), Some(ESTALE)));
+    }
 
     #[test]
     fn subtree_is_exactly_the_descendants() {
