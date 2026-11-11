@@ -13,6 +13,12 @@ All notable changes are listed here. The format follows
   amd64 images run natively there. It is new and tested on one Mac so far
   (Core i7-9750H, macOS 26.5.1); see "Intel Macs" in the README.
 
+### Fixed
+
+- `make guest` works again on a Mac without a cached kernel: Alpine removed
+  the pinned `linux-virt-6.18.58-r0` from its mirrors (404). Pinned to
+  6.18.62-r0.
+
 ## [0.2.7] - 2026-11-05
 
 ### Fixed

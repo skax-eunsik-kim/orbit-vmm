@@ -18,8 +18,8 @@ case "${ORBIT_GUEST_ARCH:-$(uname -m)}" in
     ARCH=aarch64
     MINIROOT=alpine-minirootfs-3.24.2-aarch64.tar.gz
     MINIROOT_SHA256=9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773
-    KVER=6.18.58-r0
-    KAPK_SHA256=b46c51ddf572d85b2ba7b9adfaa64f4c38fc490c93d97a20ffd2418d51284085
+    KVER=6.18.62-r0
+    KAPK_SHA256=3a9a0f16adaabee0e4e05e373682249e2a99ab000faebf6aaaf682ae575c661d
     KCACHE=linux-virt-$KVER.apk
     ;;
   x86_64)
