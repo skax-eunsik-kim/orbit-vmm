@@ -860,7 +860,14 @@ impl Server {
                 r.skip(4);
                 let fh = r.u64();
                 self.path(node).and_then(|p| {
-                    let attr = if flags & 1 != 0 { self.with_file(fh, hostfs::fstat)? } else { self.root.lstat(&p)? };
+                    let attr = if flags & 1 != 0 {
+                        self.with_file(fh, hostfs::fstat)?
+                    } else {
+                        // Same as OPEN: the guest still trusts its entry for a
+                        // name the Mac has removed, and ENOENT here would fail
+                        // open(O_CREAT) on it. ESTALE makes it look again.
+                        self.root.lstat(&p).map_err(|e| if e == ENOENT { ESTALE } else { e })?
+                    };
                     Ok(attr_out(&view(&self.root, &p, attr)))
                 })
             }
@@ -1904,9 +1911,11 @@ mod tests {
         let file = lookup(lookup(ROOT, "w"), "event");
         std::fs::remove_file(w.join("event")).unwrap();
         let open = [libc::O_WRONLY as u32, 0].map(u32::to_le_bytes).concat();
-        let got = server.handle(FUSE_OPEN, file, caller, &open, &[]).unwrap();
+        let opened = server.handle(FUSE_OPEN, file, caller, &open, &[]).unwrap();
+        let getattr = [0u8; 16];
+        let stat = server.handle(FUSE_GETATTR, file, caller, &getattr, &[]).unwrap();
         std::fs::remove_dir_all(&share).unwrap();
-        assert_eq!(got.err(), Some(ESTALE));
+        assert_eq!((opened.err(), stat.err()), (Some(ESTALE), Some(ESTALE)));
     }
 
     #[test]
