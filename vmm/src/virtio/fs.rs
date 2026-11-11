@@ -1893,7 +1893,7 @@ mod tests {
         let share = share.canonicalize().unwrap();
         let w = w.canonicalize().unwrap();
         std::fs::write(w.join("event"), b"x").unwrap();
-        let server = Server::new(Root::open(&share, &[w.clone()]).unwrap());
+        let server = Server::new(Root::open(&share, std::slice::from_ref(&w)).unwrap());
         let caller = (0, 0);
         let lookup = |node: u64, name: &str| {
             let mut b = name.as_bytes().to_vec();
