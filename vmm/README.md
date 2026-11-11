@@ -8,7 +8,9 @@ The VMM: one Rust binary, `orbit-vmm`, on Hypervisor.framework. `make build`
 | Path | What |
 |---|---|
 | [`src/main.rs`](src/main.rs) | Command line, start-up, the control channel client (`--control`), self-tests. |
-| [`src/vm/`](src/vm) | The machine: Hypervisor.framework FFI, in-kernel GICv3, boot and device tree, PL011 console, vCPU threads and PSCI. |
+| [`src/vm/aarch64/`](src/vm/aarch64) | The Apple Silicon machine: Hypervisor.framework FFI, in-kernel GICv3, boot and device tree, PL011 console, vCPU threads and PSCI. |
+| [`src/vm/x86_64/`](src/vm/x86_64) | The Intel machine: Hypervisor.framework VMX FFI, in-kernel local APIC plus our IOAPIC, MP table and Linux 64-bit boot, 8250 console and CMOS clock, MMIO instruction decoding, vCPU threads, INIT/SIPI and idle. |
+| [`src/console.rs`](src/console.rs) | Guest console output to `console.log`, capped. |
 | [`src/virtio/`](src/virtio) | virtio-mmio transport and devices: `blk` (data disk, discard, disk guard), `net`, `vsock`, `fs` + `hostfs` (shared directories), `balloon` (free page reporting). |
 | [`src/slirp.rs`](src/slirp.rs) | libslirp on its own thread: NAT, DNS, port forwards. |
 | [`src/ports.rs`](src/ports.rs) | Published ports: Docker events plus a 250 ms poll, forwarded to the Mac's `127.0.0.1`. |
@@ -23,4 +25,6 @@ The VMM: one Rust binary, `orbit-vmm`, on Hypervisor.framework. `make build`
 | [`bench/`](bench) | VMM-level checks: `fssec.sh` (shared-directory security, 23 checks), `memtrace.sh`, `memxref.py`, `vsock-echo.py`. |
 
 `make lint test` runs `cargo fmt --check`, `clippy -D warnings`, `cargo test`
-and shellcheck. Dependencies are `libc`, `vm-fdt` and libslirp only.
+and shellcheck. Only the architecture of the Mac you build on is compiled;
+check the other one with `cargo clippy --all-targets --target aarch64-apple-darwin`
+(or `x86_64-apple-darwin`). Dependencies are `libc`, `vm-fdt` and libslirp only.

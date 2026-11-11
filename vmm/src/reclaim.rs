@@ -84,9 +84,9 @@ pub fn footprint_mib() -> u64 {
 /// memory and check which release method actually lowers the footprint.
 pub fn selftest() -> i32 {
     const SIZE: usize = 256 << 20;
-    const IPA: u64 = 0x8000_0000;
+    const IPA: u64 = crate::memory::RAM_BASE;
     let flags = hvf::HV_MEMORY_READ | hvf::HV_MEMORY_WRITE | hvf::HV_MEMORY_EXEC;
-    if let Err(e) = hv!(hv_vm_create(std::ptr::null_mut())) {
+    if let Err(e) = hvf::vm_create() {
         eprintln!("{e}");
         return 1;
     }
@@ -163,8 +163,8 @@ pub fn selftest() -> i32 {
 }
 
 /// Releases the whole host pages inside `[gpa, gpa+len)`. Partial host pages at
-/// either end stay resident (a 16 KiB host page may still hold live 4 KiB guest
-/// pages). Returns the number of bytes released.
+/// either end stay resident (on arm64 a 16 KiB host page may still hold live
+/// 4 KiB guest pages). Returns the number of bytes released.
 pub fn release_range(mem: &GuestMemory, gpa: u64, len: u64) -> u64 {
     let Some(start) = gpa.checked_next_multiple_of(HOST_PAGE_SIZE) else {
         return 0;

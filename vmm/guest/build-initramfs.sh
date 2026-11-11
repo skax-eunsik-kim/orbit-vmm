@@ -6,8 +6,18 @@ set -euo pipefail
 NAME=$1 OUT=$2
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CACHE="${ORBIT_HOME:-$HOME/.orbit}/cache"
-MINI=$(ls "$CACHE"/alpine-minirootfs-*-aarch64.tar.gz | tail -1)
-KAPK=$(ls "$CACHE"/linux-virt-*.apk | tail -1)
+# The Mac's architecture: under Rosetta `uname -m` says x86_64.
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" != 1 ]; then
+  MINI=$(ls "$CACHE"/alpine-minirootfs-*-x86_64.tar.gz | tail -1)
+  KAPK=$(ls "$CACHE"/linux-virt-*-x86_64.apk | tail -1)
+else
+  MINI=$(ls "$CACHE"/alpine-minirootfs-*-aarch64.tar.gz | tail -1)
+  # The newest arm64 kernel: the x86-64 ones share the prefix.
+  KAPK=
+  for f in "$CACHE"/linux-virt-*.apk; do
+    case "$f" in *-x86_64.apk) ;; *) KAPK=$f ;; esac
+  done
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

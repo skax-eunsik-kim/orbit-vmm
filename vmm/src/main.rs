@@ -1,3 +1,4 @@
+mod console;
 mod devices;
 mod fsevents;
 mod memdump;
@@ -8,7 +9,7 @@ mod reclaim;
 mod signals;
 mod slirp;
 mod virtio;
-mod vm; // hvf bindings, GIC, vCPU loop, PSCI, FDT, PL011, boot
+mod vm; // per architecture: hvf bindings, interrupt controller, vCPU loop, boot
 
 use std::path::{Path, PathBuf};
 
