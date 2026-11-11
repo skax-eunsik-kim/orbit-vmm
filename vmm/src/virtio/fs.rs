@@ -1893,7 +1893,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn open_of_a_name_deleted_on_the_mac_asks_the_guest_to_look_again() {
+    fn a_name_deleted_on_the_mac_makes_the_guest_look_again() {
         let share = std::env::temp_dir().join(format!("orbit-fs-test-{}", std::process::id()));
         let w = share.join("w");
         std::fs::create_dir_all(&w).unwrap();
