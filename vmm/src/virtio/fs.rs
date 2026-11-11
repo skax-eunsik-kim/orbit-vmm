@@ -137,6 +137,7 @@ const MAX_NODE_PATH_BYTES: usize = 256 << 20;
 /// Longest path the guest may use below the share, like Linux's PATH_MAX.
 const MAX_PATH_BYTES: usize = 4096;
 const ENAMETOOLONG: i32 = 36;
+const ESTALE: i32 = 116;
 const MAX_DIR_CACHE_BYTES: usize = 512 << 20;
 
 /// Attribute cache lifetime in ms (ORBIT_FS_ATTR_TTL_MS, default 500). File
@@ -953,7 +954,13 @@ impl Server {
                 // relies on that to make injected events see fresh content.
                 let keep = if flags & 3 == 0 { FOPEN_KEEP_CACHE } else { 0 };
                 // OPEN never creates (that is CREATE): drop O_CREAT/O_EXCL.
-                self.path(node).and_then(|p| self.open(&p, flags & !0o300, None)).map(|fh| open_out(fh, keep))
+                // Gone from the Mac before the guest's cached entry expired:
+                // ESTALE makes the guest kernel look the name up again, so
+                // open(O_CREAT) then creates the file instead of failing.
+                self.path(node)
+                    .and_then(|p| self.open(&p, flags & !0o300, None))
+                    .map(|fh| open_out(fh, keep))
+                    .map_err(|e| if e == ENOENT { ESTALE } else { e })
             }
             FUSE_CREATE => {
                 let flags = r.u32();
@@ -1877,6 +1884,30 @@ mod tests {
     use super::*;
     use crate::fsevents::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn open_of_a_name_deleted_on_the_mac_asks_the_guest_to_look_again() {
+        let share = std::env::temp_dir().join(format!("orbit-fs-test-{}", std::process::id()));
+        let w = share.join("w");
+        std::fs::create_dir_all(&w).unwrap();
+        let share = share.canonicalize().unwrap();
+        let w = w.canonicalize().unwrap();
+        std::fs::write(w.join("event"), b"x").unwrap();
+        let server = Server::new(Root::open(&share, &[w.clone()]).unwrap());
+        let caller = (0, 0);
+        let lookup = |node: u64, name: &str| {
+            let mut b = name.as_bytes().to_vec();
+            b.push(0);
+            let out = server.handle(FUSE_LOOKUP, node, caller, &b, &[]).unwrap().unwrap();
+            u64::from_le_bytes(out[..8].try_into().unwrap())
+        };
+        let file = lookup(lookup(ROOT, "w"), "event");
+        std::fs::remove_file(w.join("event")).unwrap();
+        let open = [libc::O_WRONLY as u32, 0].map(u32::to_le_bytes).concat();
+        let got = server.handle(FUSE_OPEN, file, caller, &open, &[]).unwrap();
+        std::fs::remove_dir_all(&share).unwrap();
+        assert_eq!(got.err(), Some(ESTALE));
+    }
 
     #[test]
     fn subtree_is_exactly_the_descendants() {
